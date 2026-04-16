@@ -10,3 +10,5 @@ ext/rbxl_native/*.o
 ext/rbxl_native/*.so
 ext/rbxl_native/*.bundle
 benchmark/ext/
+pkg/
+.codex
