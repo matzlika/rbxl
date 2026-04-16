@@ -1,6 +1,14 @@
 # rbxl
 
-`openpyxl` inspired Ruby gem for large-ish `.xlsx` files.
+Fast, memory-friendly Ruby gem for streaming `.xlsx` reads and writes.
+
+`rbxl` is built for the two workbook workflows that scale cleanly:
+
+- read-only row streaming
+- write-only workbook generation
+
+The API is intentionally small and `openpyxl`-inspired, with an optional
+native extension for faster XML parsing when you need more throughput.
 
 Current scope is intentionally small:
 
@@ -103,17 +111,17 @@ bundle install
 cd benchmark && npm install && cd ..
 
 # Run tests (pure Ruby)
-ruby -Ilib -Itest test/rbxl_test.rb
+bundle exec ruby -Ilib -Itest test/rbxl_test.rb
 
 # Run tests (with native extension)
 cd ext/rbxl_native && ruby extconf.rb && make && cd ../..
-ruby -Ilib -Itest -r rbxl/native test/rbxl_test.rb
-ruby -Ilib -Itest test/fast_ext_test.rb
+bundle exec ruby -Ilib -Itest -r rbxl/native test/rbxl_test.rb
+bundle exec ruby -Ilib -Itest test/fast_ext_test.rb
 
 # Benchmarks
-ruby -Ilib benchmark/compare.rb                     # pure Ruby
-ruby -Ilib -r rbxl/native benchmark/compare.rb      # with native
-RBXL_BENCH_WARMUP=1 RBXL_BENCH_ITERATIONS=5 ruby -Ilib benchmark/read_modes.rb
+bundle exec ruby -Ilib benchmark/compare.rb                     # pure Ruby
+bundle exec ruby -Ilib -r rbxl/native benchmark/compare.rb      # with native
+RBXL_BENCH_WARMUP=1 RBXL_BENCH_ITERATIONS=5 bundle exec ruby -Ilib benchmark/read_modes.rb
 
 # Generate API docs
 bundle exec rake rdoc

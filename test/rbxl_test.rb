@@ -106,8 +106,8 @@ class RbxlTest < Minitest::Test
       book.add_sheet("Report") << [Rbxl::WriteOnlyCell.new("x", style_id: 0)]
       book.save(path)
 
-      assert_raises(Rbxl::ClosedWorkbookError) { book.add_sheet("Another") }
-      assert_raises(Rbxl::ClosedWorkbookError) { book.save(path) }
+      assert_raises(Rbxl::WorkbookAlreadySavedError) { book.add_sheet("Another") }
+      assert_raises(Rbxl::WorkbookAlreadySavedError) { book.save(path) }
     end
   end
 

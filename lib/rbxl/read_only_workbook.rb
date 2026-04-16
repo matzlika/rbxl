@@ -1,15 +1,53 @@
 module Rbxl
+  # Read-only workbook backed by a ZIP archive.
+  #
+  # The workbook opens the underlying <tt>.xlsx</tt> once and keeps a single
+  # +Zip::File+ handle open for the lifetime of the object. Worksheets are
+  # opened lazily via {#sheet}, so callers can process very large sheets
+  # without materializing the full workbook in memory.
+  #
+  # Typical use:
+  #
+  #   book = Rbxl.open("big.xlsx", read_only: true)
+  #   begin
+  #     book.sheet_names                    # => ["Data"]
+  #     book.sheet("Data").each_row do |row|
+  #       process(row.values)
+  #     end
+  #   ensure
+  #     book.close
+  #   end
+  #
+  # After {#close} every subsequent {#sheet} call raises
+  # {Rbxl::ClosedWorkbookError}.
   class ReadOnlyWorkbook
+    # Namespace for the main SpreadsheetML schema.
     MAIN_NS = "http://schemas.openxmlformats.org/spreadsheetml/2006/main"
+
+    # Namespace used for document-level relationships.
     REL_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
+
+    # Namespace used by the OPC package relationships layer.
     PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 
-    attr_reader :path, :sheet_names
+    # @return [String] filesystem path the workbook was opened from
+    attr_reader :path
 
+    # @return [Array<String>] visible sheet names in workbook order
+    attr_reader :sheet_names
+
+    # Convenience constructor equivalent to <tt>new(path)</tt>.
+    #
+    # @param path [String, #to_path] path to the <tt>.xlsx</tt> file
+    # @return [Rbxl::ReadOnlyWorkbook]
     def self.open(path)
       new(path)
     end
 
+    # Opens the ZIP archive, pre-loads shared strings, and indexes the
+    # worksheet entries keyed by visible sheet name.
+    #
+    # @param path [String, #to_path] path to the <tt>.xlsx</tt> file
     def initialize(path)
       @path = path
       @zip = Zip::File.open(path)
@@ -19,6 +57,15 @@ module Rbxl
       @closed = false
     end
 
+    # Returns a streaming worksheet by visible sheet name.
+    #
+    # The returned object shares the workbook's ZIP handle. Closing the
+    # workbook invalidates any worksheets produced by prior calls.
+    #
+    # @param name [String] visible sheet name as listed in {#sheet_names}
+    # @return [Rbxl::ReadOnlyWorksheet]
+    # @raise [Rbxl::SheetNotFoundError] if +name+ is not present
+    # @raise [Rbxl::ClosedWorkbookError] if the workbook has been closed
     def sheet(name)
       ensure_open!
 
@@ -29,6 +76,10 @@ module Rbxl
       ReadOnlyWorksheet.new(zip: @zip, entry_path: entry_path, shared_strings: @shared_strings, name: name)
     end
 
+    # Releases the underlying ZIP file handle. Idempotent; subsequent calls
+    # are no-ops.
+    #
+    # @return [void]
     def close
       return if closed?
 
@@ -36,6 +87,7 @@ module Rbxl
       @closed = true
     end
 
+    # @return [Boolean] whether {#close} has been called
     def closed?
       @closed
     end

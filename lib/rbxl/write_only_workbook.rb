@@ -1,13 +1,38 @@
 module Rbxl
+  # Write-only workbook for streaming XLSX generation.
+  #
+  # The workbook accumulates rows per worksheet and emits the full
+  # <tt>.xlsx</tt> package in a single pass when {#save} is called. By
+  # design a write-only workbook can only be saved once: {#save} calls
+  # {#close} on success, and any subsequent call raises
+  # {Rbxl::WorkbookAlreadySavedError}.
+  #
+  #   book  = Rbxl.new(write_only: true)
+  #   sheet = book.add_sheet("Report")
+  #   sheet.append(["id", "name"])
+  #   sheet.append([1, "alice"])
+  #   book.save("report.xlsx")
+  #
+  # Style output is intentionally minimal: a single default style entry is
+  # emitted so that authored +style_id+ references resolve, but arbitrary
+  # workbook styling is out of scope for the MVP API.
   class WriteOnlyWorkbook
+    # @return [Array<Rbxl::WriteOnlyWorksheet>] worksheets in insertion order
     attr_reader :worksheets
 
+    # Creates an empty write-only workbook with no worksheets.
     def initialize
       @worksheets = []
       @closed = false
       @saved = false
     end
 
+    # Creates and returns a new worksheet appended to this workbook.
+    #
+    # @param name [String] visible sheet name
+    # @return [Rbxl::WriteOnlyWorksheet]
+    # @raise [Rbxl::ClosedWorkbookError] if the workbook has been closed
+    # @raise [Rbxl::WorkbookAlreadySavedError] if {#save} has already succeeded
     def add_sheet(name)
       ensure_writable!
 
@@ -16,6 +41,16 @@ module Rbxl
       sheet
     end
 
+    # Serializes the workbook to an <tt>.xlsx</tt> file at +path+.
+    #
+    # On success the workbook is closed automatically; the method returns
+    # the path that was written, suitable for chaining.
+    #
+    # @param path [String, #to_path] destination filesystem path
+    # @return [String] the saved path
+    # @raise [Rbxl::Error] if no worksheets have been added
+    # @raise [Rbxl::ClosedWorkbookError] if the workbook is already closed
+    # @raise [Rbxl::WorkbookAlreadySavedError] if {#save} was already called
     def save(path)
       ensure_writable!
       raise Error, "at least one worksheet is required" if worksheets.empty?
@@ -44,10 +79,16 @@ module Rbxl
       path
     end
 
+    # Marks the workbook as closed. Further mutating operations raise
+    # {Rbxl::ClosedWorkbookError}. This is called automatically by a
+    # successful {#save}.
+    #
+    # @return [Boolean] the new closed state (always +true+)
     def close
       @closed = true
     end
 
+    # @return [Boolean] whether the workbook has been closed
     def closed?
       @closed
     end
@@ -55,8 +96,8 @@ module Rbxl
     private
 
     def ensure_writable!
-      raise ClosedWorkbookError, "workbook has been closed" if closed?
       raise WorkbookAlreadySavedError, "write-only workbook can only be saved once" if @saved
+      raise ClosedWorkbookError, "workbook has been closed" if closed?
     end
 
     def write_entry(zip, name, content)

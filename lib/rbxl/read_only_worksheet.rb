@@ -1,12 +1,57 @@
 module Rbxl
+  # Streaming worksheet reader for a single sheet of a read-only workbook.
+  #
+  # Instances are produced by {Rbxl::ReadOnlyWorkbook#sheet} and must not be
+  # constructed directly; their lifecycle is bound to the workbook's ZIP
+  # handle. Rows can be consumed as {Rbxl::Row} objects or as plain value
+  # arrays depending on the iteration options.
+  #
+  # == Iteration modes
+  #
+  #   # Default: yield Rbxl::Row with cell wrappers.
+  #   sheet.each_row { |row| row.values }
+  #
+  #   # Fast path: yield plain Array<Object> of decoded values.
+  #   sheet.each_row(values_only: true) { |values| ... }
+  #
+  #   # Pad missing cells in sparse rows up to max_column.
+  #   sheet.each_row(pad_cells: true) { |row| ... }
+  #
+  #   # Replicate anchor values across merged ranges.
+  #   sheet.each_row(expand_merged: true) { |row| ... }
+  #
+  # Iteration without a block returns an +Enumerator+.
+  #
+  # == Dimensions
+  #
+  # The worksheet dimension (the <tt>A1:C10</tt>-style range) is read from
+  # the sheet's +<dimension>+ element when present. When absent or when the
+  # caller wants to recompute it, {#calculate_dimension} with
+  # <tt>force: true</tt> scans the sheet for actual cell coordinates.
   class ReadOnlyWorksheet
+    # @private Nokogiri reader node-type shortcuts.
     ELEMENT_NODE = Nokogiri::XML::Reader::TYPE_ELEMENT
+    # @private
     TEXT_NODE = Nokogiri::XML::Reader::TYPE_TEXT
+    # @private
     CDATA_NODE = Nokogiri::XML::Reader::TYPE_CDATA
+    # @private
     END_ELEMENT_NODE = Nokogiri::XML::Reader::TYPE_END_ELEMENT
 
-    attr_reader :name, :dimensions
+    # @return [String] visible sheet name
+    attr_reader :name
 
+    # Parsed dimension metadata, +nil+ when the sheet has no +<dimension>+
+    # element and no scan has been forced. When present the hash has keys
+    # +:ref+, +:max_col+, and +:max_row+.
+    #
+    # @return [Hash{Symbol => Object}, nil]
+    attr_reader :dimensions
+
+    # @param zip [Zip::File] open archive shared with the workbook
+    # @param entry_path [String] ZIP entry path for this sheet's XML
+    # @param shared_strings [Array<String>] pre-decoded shared strings table
+    # @param name [String] visible sheet name
     def initialize(zip:, entry_path:, shared_strings:, name:)
       @zip = zip
       @entry_path = entry_path
@@ -17,6 +62,21 @@ module Rbxl
       @merge_anchor_values = {}
     end
 
+    # Iterates rows in worksheet order.
+    #
+    # With +values_only+ and neither +pad_cells+ nor +expand_merged+ set,
+    # iteration takes a tighter path that yields frozen +Array<Object>+
+    # rows and skips allocating cell wrappers.
+    #
+    # @param pad_cells [Boolean] pad sparse rows with {Rbxl::EmptyCell} (or
+    #   <tt>[coordinate, nil]</tt> pairs in +values_only+ mode) up to the
+    #   worksheet's +max_column+
+    # @param values_only [Boolean] yield plain value arrays instead of
+    #   {Rbxl::Row} instances
+    # @param expand_merged [Boolean] propagate the anchor value of every
+    #   merged range across the range's cells
+    # @yieldparam row [Rbxl::Row, Array<Object>]
+    # @return [Enumerator, void] enumerator when called without a block
     def each_row(pad_cells: false, values_only: false, expand_merged: false, &block)
       return enum_for(:each_row, pad_cells: pad_cells, values_only: values_only, expand_merged: expand_merged) unless block
 
@@ -27,26 +87,54 @@ module Rbxl
       end
     end
 
+    # Enumerator-returning alias for {#each_row} that reads more naturally
+    # when the call site chains further enumerable operations.
+    #
+    #   sheet.rows(values_only: true).take(10)
+    #
+    # @param values_only [Boolean] see {#each_row}
+    # @param pad_cells [Boolean] see {#each_row}
+    # @param expand_merged [Boolean] see {#each_row}
+    # @return [Enumerator]
     def rows(values_only: false, pad_cells: false, expand_merged: false)
       each_row(values_only: values_only, pad_cells: pad_cells, expand_merged: expand_merged)
     end
 
+    # @return [Integer, nil] rightmost column index (1-based) from the
+    #   worksheet dimension, or +nil+ when dimensions are unknown
     def max_column
       return nil unless dimensions
 
       dimensions[:max_col]
     end
 
+    # @return [Integer, nil] bottom row index (1-based) from the worksheet
+    #   dimension, or +nil+ when dimensions are unknown
     def max_row
       return nil unless dimensions
 
       dimensions[:max_row]
     end
 
+    # Clears cached dimension metadata so that the next call to
+    # {#calculate_dimension} recomputes it.
+    #
+    # @return [nil]
     def reset_dimensions
       @dimensions = nil
     end
 
+    # Returns the worksheet dimension reference (e.g. <tt>"A1:C10"</tt>).
+    #
+    # When the sheet lacks a +<dimension>+ element the default is to raise
+    # {Rbxl::UnsizedWorksheetError}. Passing <tt>force: true</tt> scans the
+    # sheet for the actual cell bounds instead; a sheet with no cells at
+    # all falls back to <tt>"A1:A1"</tt>.
+    #
+    # @param force [Boolean] scan the sheet when no stored dimension exists
+    # @return [String] Excel-style range reference
+    # @raise [Rbxl::UnsizedWorksheetError] if the sheet is unsized and
+    #   +force+ is +false+
     def calculate_dimension(force: false)
       if dimensions
         return dimensions[:ref]

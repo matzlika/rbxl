@@ -5,8 +5,8 @@ Gem::Specification.new do |spec|
   spec.version = Rbxl::VERSION
   spec.authors = ["Taro KOBAYASHI"]
   spec.email = ["taro@matzlika.co.jp"]
-  spec.summary = "Streaming xlsx reader/writer inspired by openpyxl"
-  spec.description = "A small Ruby gem for read-only and write-only xlsx workflows."
+  spec.summary = "A fast, memory-friendly Ruby gem for streaming XLSX reads and writes."
+  spec.description = "rbxl is a Ruby gem for read-only row streaming and write-only XLSX generation, with an optional native extension for faster XML parsing."
   spec.homepage = "https://github.com/matzlika/rbxl"
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.1"
@@ -17,7 +17,7 @@ Gem::Specification.new do |spec|
     "changelog_uri" => "https://github.com/matzlika/rbxl/releases"
   }
 
-  spec.files = Dir["lib/**/*.rb"] + Dir["ext/**/*.{rb,c,h}"] + %w[CHANGELOG.md LICENSE.txt README.md Rakefile]
+  spec.files = Dir["lib/**/*.rb"] + Dir["ext/**/*.{rb,c,h}"] + Dir["sig/**/*.rbs"] + %w[CHANGELOG.md LICENSE.txt README.md Rakefile]
   spec.require_paths = ["lib"]
   spec.extensions = ["ext/rbxl_native/extconf.rb"]
 

@@ -1,17 +1,50 @@
 module Rbxl
+  # Worksheet builder used by {Rbxl::WriteOnlyWorkbook}.
+  #
+  # Rows are appended in order and later serialized as SpreadsheetML by
+  # {#to_xml} when the workbook is saved. The builder never rewrites a
+  # previously appended row, so the worksheet's in-memory footprint scales
+  # linearly with the number of appended rows.
+  #
+  # == Row values
+  #
+  # Each element of an appended row may be one of:
+  #
+  # * +nil+ — serialized as an empty cell
+  # * +true+ / +false+ — serialized as a boolean cell
+  # * +Integer+ / +Numeric+ — serialized as a numeric cell
+  # * +Date+ / +DateTime+ / +Time+ — serialized as an ISO-8601 inline string
+  # * any other object — serialized as +value.to_s+ in an inline string
+  # * {Rbxl::WriteOnlyCell} — same as the above, but with an optional style id
   class WriteOnlyWorksheet
+    # @return [String] visible sheet name
     attr_reader :name
 
+    # @param name [String] visible sheet name
     def initialize(name:)
       @name = name
       @rows = []
       @column_name_cache = []
     end
 
+    # Appends a row of values. Equivalent to {#append} so that the shell
+    # operator reads naturally at the call site:
+    #
+    #   sheet << ["id", "name"]
+    #
+    # @param values [Array, Enumerator] row values
+    # @return [Rbxl::WriteOnlyWorksheet] +self+ for chaining
+    # @raise [TypeError] if +values+ is not Array-like
     def <<(values)
       append(values)
     end
 
+    # Appends a row of values.
+    #
+    # @param values [Array, Enumerator] row values; each element is serialized
+    #   according to the rules documented on the class
+    # @return [Rbxl::WriteOnlyWorksheet] +self+ for chaining
+    # @raise [TypeError] if +values+ is neither an Array nor an Enumerator
     def append(values)
       unless values.is_a?(Array) || values.is_a?(Enumerator)
         raise TypeError, "row must be an Array or Enumerator, got #{values.class}"
@@ -21,6 +54,14 @@ module Rbxl
       self
     end
 
+    # Serializes the worksheet to SpreadsheetML.
+    #
+    # When <tt>require "rbxl/native"</tt> has been loaded the native
+    # extension handles serialization for a significant speedup; otherwise
+    # a pure-Ruby implementation is used. Both paths produce equivalent
+    # output.
+    #
+    # @return [String] worksheet XML
     def to_xml
       if defined?(Rbxl::Native)
         return Rbxl::Native.generate_sheet(@rows)

@@ -1,5 +1,10 @@
 # Changelog
 
+## 1.0.2
+
+- Expand RDoc coverage across the public API.
+- Tighten RBS signatures to match the actual runtime types.
+
 ## 1.0.1
 
 - Fix ZIP64 handling.

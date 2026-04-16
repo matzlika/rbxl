@@ -1,0 +1,118 @@
+module Rbxl
+  VERSION: String
+
+  type cell_value = String | Integer | Float | bool | nil
+  type pathish = String | Pathname
+  type row_input = Array[untyped] | Enumerator[untyped, untyped]
+  type row_values = Array[cell_value]
+  type row_cell = Cell | ReadOnlyCell | EmptyCell
+  type row_cells = Array[row_cell]
+  type dimensions = { ref: String, max_col: Integer, max_row: Integer }
+
+  def self.open: (pathish path, ?read_only: bool) -> ReadOnlyWorkbook
+  def self.new: (?write_only: bool) -> WriteOnlyWorkbook
+
+  class Error < StandardError
+  end
+
+  class SheetNotFoundError < Error
+  end
+
+  class ClosedWorkbookError < Error
+  end
+
+  class WorkbookAlreadySavedError < Error
+  end
+
+  class UnsizedWorksheetError < Error
+  end
+
+  class Cell
+    attr_accessor value: cell_value
+    attr_accessor coordinate: String?
+
+    def initialize: (?value: cell_value, ?coordinate: String?) -> void
+  end
+
+  class ReadOnlyCell
+    attr_reader coordinate: String
+    attr_reader value: cell_value
+
+    def initialize: (String coordinate, cell_value value) -> void
+  end
+
+  class EmptyCell
+    attr_reader coordinate: String
+
+    def initialize: (coordinate: String) -> void
+    def value: () -> nil
+  end
+
+  class WriteOnlyCell
+    attr_reader value: untyped
+    attr_reader style_id: Integer?
+
+    def initialize: (untyped value, ?style_id: Integer?) -> void
+  end
+
+  class Row
+    attr_reader index: Integer
+    attr_reader cells: row_cells
+
+    def initialize: (index: Integer, cells: row_cells) -> void
+    def []: (Integer offset) -> row_cell?
+    def values: () -> row_values
+    def size: () -> Integer
+  end
+
+  class ReadOnlyWorkbook
+    MAIN_NS: String
+    REL_NS: String
+    PACKAGE_REL_NS: String
+
+    attr_reader path: String
+    attr_reader sheet_names: Array[String]
+
+    def self.open: (pathish path) -> ReadOnlyWorkbook
+    def initialize: (pathish path) -> void
+    def sheet: (String name) -> ReadOnlyWorksheet
+    def close: () -> void
+    def closed?: () -> bool
+  end
+
+  class ReadOnlyWorksheet
+    attr_reader name: String
+    attr_reader dimensions: dimensions?
+
+    def initialize: (zip: untyped, entry_path: String, shared_strings: Array[String], name: String) -> void
+
+    def each_row: (?pad_cells: bool, ?values_only: bool, ?expand_merged: bool) { (Row | row_values) -> void } -> void
+                | (?pad_cells: bool, ?values_only: bool, ?expand_merged: bool) -> Enumerator[Row | row_values, void]
+
+    def rows: (?values_only: bool, ?pad_cells: bool, ?expand_merged: bool) -> Enumerator[Row | row_values, void]
+
+    def max_column: () -> Integer?
+    def max_row: () -> Integer?
+    def reset_dimensions: () -> nil
+    def calculate_dimension: (?force: bool) -> String
+  end
+
+  class WriteOnlyWorkbook
+    attr_reader worksheets: Array[WriteOnlyWorksheet]
+
+    def initialize: () -> void
+    def add_sheet: (String name) -> WriteOnlyWorksheet
+    def save: (pathish path) -> String
+    def close: () -> bool
+    def closed?: () -> bool
+  end
+
+  class WriteOnlyWorksheet
+    attr_reader name: String
+
+    def initialize: (name: String) -> void
+    def <<: (row_input values) -> WriteOnlyWorksheet
+    def append: (row_input values) -> WriteOnlyWorksheet
+    def to_xml: () -> String
+  end
+end

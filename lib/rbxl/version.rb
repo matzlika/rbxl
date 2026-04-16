@@ -1,3 +1,4 @@
 module Rbxl
-  VERSION = "1.0.1"
+  # Gem version string, tracked with semantic versioning.
+  VERSION = "1.0.2"
 end
