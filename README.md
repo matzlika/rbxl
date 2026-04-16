@@ -96,6 +96,8 @@ Requirements for the C extension:
 
 ## Development
 
+Development in this repository assumes Ruby 3.4.8 (`.ruby-version`).
+
 ```bash
 bundle install
 cd benchmark && npm install && cd ..
@@ -112,6 +114,9 @@ ruby -Ilib -Itest test/fast_ext_test.rb
 ruby -Ilib benchmark/compare.rb                     # pure Ruby
 ruby -Ilib -r rbxl/native benchmark/compare.rb      # with native
 RBXL_BENCH_WARMUP=1 RBXL_BENCH_ITERATIONS=5 ruby -Ilib benchmark/read_modes.rb
+
+# Generate API docs
+bundle exec rake rdoc
 ```
 
 ## Benchmarks

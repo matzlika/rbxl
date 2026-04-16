@@ -13,4 +13,5 @@ ext/rbxl_native/*.bundle
 benchmark/ext/
 benchmark/node_modules/
 pkg/
+html/
 .codex
