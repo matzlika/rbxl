@@ -2,12 +2,15 @@
 
 require "benchmark"
 require "tmpdir"
+require "rbconfig"
 require "zip"
 require_relative "../lib/rbxl"
 
 ROWS = Integer(ENV.fetch("RBXL_BENCH_ROWS", "5000"))
 COLS = Integer(ENV.fetch("RBXL_BENCH_COLS", "10"))
 SPARSE_INTERVAL = Integer(ENV.fetch("RBXL_BENCH_SPARSE_INTERVAL", "3"))
+WARMUP = Integer(ENV.fetch("RBXL_BENCH_WARMUP", "1"))
+ITERATIONS = Integer(ENV.fetch("RBXL_BENCH_ITERATIONS", "5"))
 
 def rss_kb
   status = File.read("/proc/#{$$}/status")
@@ -18,13 +21,32 @@ rescue Errno::ENOENT
 end
 
 def benchmark(label)
-  started_rss = rss_kb
+  WARMUP.times do
+    GC.start(full_mark: true, immediate_sweep: true)
+    yield
+  end
+
+  samples = []
+  rss_deltas = []
   result = nil
-  real = Benchmark.realtime { result = yield }
+
+  ITERATIONS.times do
+    GC.start(full_mark: true, immediate_sweep: true)
+    started_rss = rss_kb
+    real = Benchmark.realtime { result = yield }
+    samples << real
+    rss_deltas << (rss_kb - started_rss)
+  end
+
+  mean = samples.sum / samples.length
+  variance = samples.sum { |sample| (sample - mean)**2 } / samples.length
   {
     label: label,
-    real: real,
-    rss_delta_kb: rss_kb - started_rss,
+    real: mean,
+    real_min: samples.min,
+    real_stddev: Math.sqrt(variance),
+    rss_delta_kb: rss_deltas.max,
+    iterations: ITERATIONS,
     result: result
   }
 end
@@ -223,16 +245,20 @@ Dir.mktmpdir("rbxl-read-modes-") do |dir|
 
   label_width = results.map { |row| row[:label].length }.max
   puts "rows=#{ROWS} cols=#{COLS} sparse_interval=#{SPARSE_INTERVAL}"
+  puts "warmup=#{WARMUP} iterations=#{ITERATIONS}"
+  puts "ruby=#{RUBY_DESCRIPTION}"
+  puts "platform=#{RbConfig::CONFIG["host"]}"
   puts "dense_file_bytes=#{File.size(dense_path)}"
   puts "sparse_file_bytes=#{File.size(sparse_path)}"
   puts "dense_shared_file_bytes=#{File.size(dense_shared_path)}"
   puts "sparse_shared_file_bytes=#{File.size(sparse_shared_path)}"
-  puts format("%-#{label_width}s  %10s  %12s  %12s", "benchmark", "real_s", "rss_delta_kb", "cell_count")
+  puts format("%-#{label_width}s  %10s  %10s  %12s  %12s", "benchmark", "mean_s", "stddev_s", "rss_delta_kb", "cell_count")
   results.each do |row|
     puts format(
-      "%-#{label_width}s  %10.4f  %12d  %12d",
+      "%-#{label_width}s  %10.4f  %10.4f  %12d  %12d",
       row[:label],
       row[:real],
+      row[:real_stddev],
       row[:rss_delta_kb],
       row[:result]
     )

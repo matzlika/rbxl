@@ -77,6 +77,9 @@ The C extension is **opt-in by design**:
   compile the C extension. If libxml2 is not found, compilation is silently
   skipped and the gem installs successfully without it. You only notice when
   you try `require "rbxl/native"`.
+- **Current boundary cost is explicit**: worksheet ZIP entries are still
+  inflated into a Ruby string before crossing into C. The extension removes
+  XML parse overhead, but not ZIP I/O or that intermediate buffer.
 
 Requirements for the C extension:
 
@@ -105,8 +108,9 @@ ruby -Ilib -Itest -r rbxl/native test/rbxl_test.rb
 ruby -Ilib -Itest test/fast_ext_test.rb
 
 # Benchmarks
-ruby -Ilib benchmark/compare.rb                    # pure Ruby
-ruby -Ilib -r rbxl/native benchmark/compare.rb     # with native
+ruby -Ilib benchmark/compare.rb                     # pure Ruby
+ruby -Ilib -r rbxl/native benchmark/compare.rb      # with native
+RBXL_BENCH_WARMUP=1 RBXL_BENCH_ITERATIONS=5 ruby -Ilib benchmark/read_modes.rb
 ```
 
 ## Benchmarks
@@ -135,6 +139,13 @@ ruby -Ilib -r rbxl/native benchmark/compare.rb     # with native
 | rbxl read values | **0.03** | 9x faster |
 
 The comparison script uses these libraries when available:
+
+Benchmark notes:
+
+- `RBXL_BENCH_WARMUP` and `RBXL_BENCH_ITERATIONS` control warmup and repeated runs.
+- Read comparisons use the same `rbxl.xlsx` fixture for `rbxl`, `roo`, `rubyXL`, and `openpyxl`.
+- Write comparisons still measure each library producing its own workbook.
+- `rss_delta_kb` is best-effort process RSS on Linux and should be treated as directional.
 
 - `rbxl` for write/read
 - `caxlsx` for write

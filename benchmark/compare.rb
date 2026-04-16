@@ -3,10 +3,13 @@
 require "benchmark"
 require "json"
 require "tmpdir"
+require "rbconfig"
 require_relative "../lib/rbxl"
 
 ROWS = Integer(ENV.fetch("RBXL_BENCH_ROWS", "5000"))
 COLS = Integer(ENV.fetch("RBXL_BENCH_COLS", "10"))
+WARMUP = Integer(ENV.fetch("RBXL_BENCH_WARMUP", "1"))
+ITERATIONS = Integer(ENV.fetch("RBXL_BENCH_ITERATIONS", "5"))
 
 def rss_kb
   status = File.read("/proc/#{$$}/status")
@@ -32,12 +35,31 @@ def build_dataset(rows:, cols:)
 end
 
 def benchmark(label)
-  started_rss = rss_kb
-  real = Benchmark.realtime { yield }
+  WARMUP.times do
+    GC.start(full_mark: true, immediate_sweep: true)
+    yield
+  end
+
+  samples = []
+  rss_deltas = []
+
+  ITERATIONS.times do
+    GC.start(full_mark: true, immediate_sweep: true)
+    started_rss = rss_kb
+    real = Benchmark.realtime { yield }
+    samples << real
+    rss_deltas << (rss_kb - started_rss)
+  end
+
+  mean = samples.sum / samples.length
+  variance = samples.sum { |sample| (sample - mean)**2 } / samples.length
   {
     label: label,
-    real: real,
-    rss_delta_kb: rss_kb - started_rss
+    real: mean,
+    real_min: samples.min,
+    real_stddev: Math.sqrt(variance),
+    rss_delta_kb: rss_deltas.max,
+    iterations: ITERATIONS
   }
 end
 
@@ -127,8 +149,9 @@ def openpyxl_available?
   system("python3", "-c", "import openpyxl", out: File::NULL, err: File::NULL)
 end
 
-def run_openpyxl_helper
+def run_openpyxl_helper(read_path:)
   helper = File.expand_path("openpyxl_compare.py", __dir__)
+  env = { "RBXL_BENCH_READ_PATH" => read_path }
   command =
     if openpyxl_available?
       ["python3", helper]
@@ -139,7 +162,7 @@ def run_openpyxl_helper
       [uv, "run", "--with", "openpyxl", "python3", helper]
     end
 
-  output = `#{shell_join(command)}`
+  output = IO.popen(env, command, &:read)
   raise "openpyxl benchmark failed" unless $?.success?
 
   JSON.parse(output, symbolize_names: true)
@@ -150,6 +173,10 @@ Dir.mktmpdir("rbxl-compare-") do |dir|
   results = []
 
   puts "rows=#{ROWS} cols=#{COLS}"
+  puts "warmup=#{WARMUP} iterations=#{ITERATIONS}"
+  puts "ruby=#{RUBY_DESCRIPTION}"
+  puts "platform=#{RbConfig::CONFIG["host"]}"
+  puts "read_fixture=rbxl.xlsx"
 
   rbxl_path = File.join(dir, "rbxl.xlsx")
   results << benchmark("rbxl write") { write_with_rbxl(rbxl_path, header, body) }.merge(size: File.size(rbxl_path))
@@ -172,18 +199,19 @@ Dir.mktmpdir("rbxl-compare-") do |dir|
   end
 
   begin
-    results.concat(run_openpyxl_helper)
+    results.concat(run_openpyxl_helper(read_path: rbxl_path))
   rescue StandardError => e
     warn "openpyxl benchmark skipped: #{e.message}"
   end
 
   label_width = results.map { |row| row[:label].length }.max
-  puts format("%-#{label_width}s  %10s  %12s  %12s", "benchmark", "real_s", "rss_delta_kb", "file_bytes")
+  puts format("%-#{label_width}s  %10s  %10s  %12s  %12s", "benchmark", "mean_s", "stddev_s", "rss_delta_kb", "file_bytes")
   results.each do |row|
     puts format(
-      "%-#{label_width}s  %10.4f  %12d  %12s",
+      "%-#{label_width}s  %10.4f  %10.4f  %12d  %12s",
       row[:label],
       row[:real],
+      row[:real_stddev],
       row[:rss_delta_kb],
       row[:size] || "-"
     )

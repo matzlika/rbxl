@@ -12,6 +12,9 @@ from openpyxl import Workbook, load_workbook
 
 ROWS = int(os.environ.get("RBXL_BENCH_ROWS", "5000"))
 COLS = int(os.environ.get("RBXL_BENCH_COLS", "10"))
+WARMUP = int(os.environ.get("RBXL_BENCH_WARMUP", "1"))
+ITERATIONS = int(os.environ.get("RBXL_BENCH_ITERATIONS", "5"))
+READ_PATH = os.environ.get("RBXL_BENCH_READ_PATH")
 
 
 def rss_kb() -> int:
@@ -38,14 +41,29 @@ def build_dataset(rows: int, cols: int):
 
 
 def measure(label, func):
-    before = rss_kb()
-    started = time.perf_counter()
-    result = func()
-    elapsed = time.perf_counter() - started
+    for _ in range(WARMUP):
+        func()
+
+    samples = []
+    rss_deltas = []
+    result = None
+    for _ in range(ITERATIONS):
+        before = rss_kb()
+        started = time.perf_counter()
+        result = func()
+        elapsed = time.perf_counter() - started
+        samples.append(elapsed)
+        rss_deltas.append(max(0, rss_kb() - before))
+
+    mean = sum(samples) / len(samples)
+    variance = sum((sample - mean) ** 2 for sample in samples) / len(samples)
     return {
         "label": label,
-        "real": elapsed,
-        "rss_delta_kb": max(0, rss_kb() - before),
+        "real": mean,
+        "real_min": min(samples),
+        "real_stddev": variance ** 0.5,
+        "rss_delta_kb": max(rss_deltas),
+        "iterations": ITERATIONS,
         "result": result,
     }
 
@@ -88,8 +106,9 @@ def main():
         write_result = measure("openpyxl write", lambda: write_with_openpyxl(path, header, body))
         write_result["size"] = os.path.getsize(path)
         results.append(write_result)
-        results.append(measure("openpyxl read", lambda: read_with_openpyxl(path)))
-        results.append(measure("openpyxl read values", lambda: read_values_with_openpyxl(path)))
+        read_path = READ_PATH or path
+        results.append(measure("openpyxl read", lambda: read_with_openpyxl(read_path)))
+        results.append(measure("openpyxl read values", lambda: read_values_with_openpyxl(read_path)))
 
         print(json.dumps(results))
 
