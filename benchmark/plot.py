@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """Generate benchmark comparison chart for rbxl README."""
 
+from datetime import datetime
+from pathlib import Path
+import re
+
 import matplotlib.pyplot as plt
 import matplotlib
 import numpy as np
@@ -96,5 +100,25 @@ for h, l in zip(handles, labels):
 ax.legend(unique_handles, unique_labels, loc="upper right", fontsize=8.5)
 
 fig.tight_layout()
-fig.savefig("benchmark/chart.png", dpi=150)
-print("Saved benchmark/chart.png")
+output_dir = Path("benchmark")
+readme_path = Path("README.md")
+timestamp = datetime.now().strftime("%Y%m%d-%H%M%S")
+latest_path = output_dir / "chart.png"
+timestamped_path = output_dir / f"chart-{timestamp}.png"
+
+for old_chart in output_dir.glob("chart-*.png"):
+    old_chart.unlink()
+
+fig.savefig(latest_path, dpi=150)
+fig.savefig(timestamped_path, dpi=150)
+
+readme_text = readme_path.read_text()
+updated_readme = re.sub(r"!\[Benchmark chart\]\(benchmark/chart(?:-\d{8}-\d{6})?\.png\)",
+                        f"![Benchmark chart]({timestamped_path.as_posix()})",
+                        readme_text)
+if updated_readme != readme_text:
+    readme_path.write_text(updated_readme)
+
+print(f"Saved {latest_path}")
+print(f"Saved {timestamped_path}")
+print(f"Updated {readme_path}")

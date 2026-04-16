@@ -163,7 +163,7 @@ best read as:
 
 5000 rows x 10 columns, Ruby 3.4 / Python 3.13 / Node 24:
 
-![Benchmark chart](benchmark/chart.png)
+![Benchmark chart](benchmark/chart-20260417-044037.png)
 
 ### Portable Baseline (`require "rbxl"`)
 
