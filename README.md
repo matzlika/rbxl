@@ -98,6 +98,7 @@ Requirements for the C extension:
 
 ```bash
 bundle install
+cd benchmark && npm install && cd ..
 
 # Run tests (pure Ruby)
 ruby -Ilib -Itest test/rbxl_test.rb
@@ -115,7 +116,7 @@ RBXL_BENCH_WARMUP=1 RBXL_BENCH_ITERATIONS=5 ruby -Ilib benchmark/read_modes.rb
 
 ## Benchmarks
 
-5000 rows x 10 columns, Ruby 3.4 / Python 3.13:
+5000 rows x 10 columns, Ruby 3.4 / Python 3.13 / Node 24:
 
 ![Benchmark chart](benchmark/chart.png)
 
@@ -123,20 +124,24 @@ RBXL_BENCH_WARMUP=1 RBXL_BENCH_ITERATIONS=5 ruby -Ilib benchmark/read_modes.rb
 
 | benchmark | real (s) |
 |---|---|
-| rbxl write | 0.09 |
-| rbxl read | 0.30 |
-| rbxl read values | 0.22 |
-| openpyxl write | 0.36 |
-| openpyxl read | 0.28 |
-| openpyxl read values | 0.26 |
+| rbxl write | 0.08 |
+| rbxl read | 0.33 |
+| rbxl read values | 0.23 |
+| exceljs write | 0.08 |
+| exceljs read | 0.17 |
+| sheetjs write | 0.13 |
+| sheetjs read | 0.19 |
+| openpyxl write | 0.35 |
+| openpyxl read | 0.22 |
+| openpyxl read values | 0.18 |
 
 ### With `rbxl/native`
 
-| benchmark | real (s) | vs openpyxl |
+| benchmark | real (s) | vs exceljs/openpyxl |
 |---|---|---|
-| rbxl write | **0.04** | 9x faster |
-| rbxl read | **0.08** | 3.5x faster |
-| rbxl read values | **0.03** | 9x faster |
+| rbxl write | **0.04** | about 2x / 9x faster |
+| rbxl read | **0.07** | about 2.6x / 3.2x faster |
+| rbxl read values | **0.03** | about 6.8x faster than openpyxl values |
 
 The comparison script uses these libraries when available:
 
@@ -144,11 +149,13 @@ Benchmark notes:
 
 - `RBXL_BENCH_WARMUP` and `RBXL_BENCH_ITERATIONS` control warmup and repeated runs.
 - Read comparisons use the same `rbxl.xlsx` fixture for `rbxl`, `roo`, `rubyXL`, and `openpyxl`.
+- JS comparisons use the same `rbxl.xlsx` fixture for `exceljs` and `sheetjs`.
 - Write comparisons still measure each library producing its own workbook.
 - `rss_delta_kb` is best-effort process RSS on Linux and should be treated as directional.
+- Install JS benchmark dependencies with `cd benchmark && npm install`.
 
 - `rbxl` for write/read
-- `caxlsx` for write
-- `roo` for read streaming
+- `exceljs` for write/read
+- `sheetjs` for write/read
 - `rubyXL` for full workbook read
 - `openpyxl` as a Python reference point when `openpyxl` or `uv` is available

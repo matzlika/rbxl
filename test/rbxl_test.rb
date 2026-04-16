@@ -1,6 +1,7 @@
 require "minitest/autorun"
 require "pathname"
 require "tmpdir"
+require "zip"
 require_relative "../lib/rbxl"
 
 class RbxlTest < Minitest::Test
@@ -146,6 +147,22 @@ class RbxlTest < Minitest::Test
       loaded = Rbxl.open(path, read_only: true)
       assert_equal [["&", "<", ">", "", "\"quoted\""]], loaded.sheet("Escaped").rows(values_only: true).to_a
       loaded.close
+    end
+  end
+
+  def test_writer_avoids_zip64_for_small_workbooks
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "small.xlsx")
+
+      book = Rbxl.new(write_only: true)
+      book.add_sheet("Bench").append(["a", "b", "c"])
+      book.save(path)
+
+      Zip::File.open(path) do |zip_file|
+        zip_file.entries.each do |entry|
+          refute_includes entry.extra.keys, :zip64
+        end
+      end
     end
   end
 

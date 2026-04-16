@@ -11,12 +11,12 @@ matplotlib.use("Agg")
 categories = ["write", "read", "read\nvalues_only"]
 
 data = {
-    "rbxl + native":    [0.038, 0.084, 0.027],
-    "rbxl (pure Ruby)": [0.098, 0.315, 0.247],
-    "openpyxl":         [0.398, 0.344, 0.288],
-    "caxlsx":           [0.484, None,  None],
-    "roo":              [None,  1.078, None],
-    "rubyXL":           [2.185, 2.028, None],
+    "rbxl + native":    [0.039, 0.068, 0.027],
+    "rbxl (pure Ruby)": [0.085, 0.327, 0.227],
+    "exceljs":          [0.078, 0.177, None],
+    "sheetjs":          [0.133, 0.187, None],
+    "openpyxl":         [0.353, 0.216, 0.184],
+    "rubyXL":           [2.041, 2.064, None],
 }
 
 # None = library does not support this mode
@@ -25,24 +25,24 @@ data = {
 colors = {
     "rbxl + native":    "#2563eb",
     "rbxl (pure Ruby)": "#60a5fa",
+    "exceljs":          "#f97316",
+    "sheetjs":          "#22c55e",
     "openpyxl":         "#f59e0b",
-    "caxlsx":           "#a855f7",
-    "roo":              "#10b981",
     "rubyXL":           "#ef4444",
 }
 
 # Footnotes for missing data
 notes = {
-    "caxlsx": "write only",
-    "roo":    "read only, no values_only",
+    "exceljs": "no values_only benchmark",
+    "sheetjs": "no values_only benchmark",
     "rubyXL": "no values_only",
 }
 
 libs = list(data.keys())
-max_y = 0.55
-bar_width = 0.12
+max_y = 0.42
+bar_width = 0.11
 
-fig, ax = plt.subplots(figsize=(10, 5.5))
+fig, ax = plt.subplots(figsize=(11, 5.8))
 
 # For each category, only place bars that have data, centered
 for cat_idx, cat in enumerate(categories):

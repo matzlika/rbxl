@@ -156,9 +156,10 @@ def run_openpyxl_helper(read_path:)
     if openpyxl_available?
       ["python3", helper]
     else
-      uv = File.expand_path("~/.local/bin/uv")
+      uv = ENV.fetch("UV", File.expand_path("~/.local/bin/uv"))
       return [] unless File.exist?(uv)
 
+      env["UV_CACHE_DIR"] = File.join(Dir.tmpdir, "uv-rbxl-openpyxl")
       [uv, "run", "--with", "openpyxl", "python3", helper]
     end
 
@@ -166,6 +167,24 @@ def run_openpyxl_helper(read_path:)
   raise "openpyxl benchmark failed" unless $?.success?
 
   JSON.parse(output, symbolize_names: true)
+end
+
+def run_js_helper(read_path:)
+  helper = File.expand_path("js_compare.js", __dir__)
+  benchmark_dir = File.expand_path(__dir__)
+  env = { "RBXL_BENCH_READ_PATH" => read_path }
+  command = ["node", "--expose-gc", helper]
+
+  output = IO.popen(env, command, chdir: benchmark_dir, &:read)
+  raise "js benchmark failed" unless $?.success?
+
+  JSON.parse(output, symbolize_names: true)
+rescue Errno::ENOENT
+  []
+rescue LoadError, StandardError => e
+  raise e if e.message.include?("js benchmark failed")
+
+  []
 end
 
 Dir.mktmpdir("rbxl-compare-") do |dir|
@@ -202,6 +221,12 @@ Dir.mktmpdir("rbxl-compare-") do |dir|
     results.concat(run_openpyxl_helper(read_path: rbxl_path))
   rescue StandardError => e
     warn "openpyxl benchmark skipped: #{e.message}"
+  end
+
+  begin
+    results.concat(run_js_helper(read_path: rbxl_path))
+  rescue StandardError => e
+    warn "js benchmark skipped: #{e.message}"
   end
 
   label_width = results.map { |row| row[:label].length }.max

@@ -20,16 +20,23 @@ module Rbxl
       ensure_writable!
       raise Error, "at least one worksheet is required" if worksheets.empty?
 
-      Zip::OutputStream.open(path) do |zip|
-        write_entry(zip, "[Content_Types].xml", content_types_xml)
-        write_entry(zip, "_rels/.rels", root_rels_xml)
-        write_entry(zip, "xl/workbook.xml", workbook_xml)
-        write_entry(zip, "xl/_rels/workbook.xml.rels", workbook_rels_xml)
-        write_entry(zip, "xl/styles.xml", styles_xml)
+      previous_zip64 = Zip.write_zip64_support
+      begin
+        Zip.write_zip64_support = false
 
-        worksheets.each_with_index do |sheet, index|
-          write_entry(zip, "xl/worksheets/sheet#{index + 1}.xml", sheet.to_xml)
+        Zip::OutputStream.open(path) do |zip|
+          write_entry(zip, "[Content_Types].xml", content_types_xml)
+          write_entry(zip, "_rels/.rels", root_rels_xml)
+          write_entry(zip, "xl/workbook.xml", workbook_xml)
+          write_entry(zip, "xl/_rels/workbook.xml.rels", workbook_rels_xml)
+          write_entry(zip, "xl/styles.xml", styles_xml)
+
+          worksheets.each_with_index do |sheet, index|
+            write_entry(zip, "xl/worksheets/sheet#{index + 1}.xml", sheet.to_xml)
+          end
         end
+      ensure
+        Zip.write_zip64_support = previous_zip64
       end
 
       @saved = true
