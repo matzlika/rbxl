@@ -116,11 +116,21 @@ RBXL_BENCH_WARMUP=1 RBXL_BENCH_ITERATIONS=5 ruby -Ilib benchmark/read_modes.rb
 
 ## Benchmarks
 
+The performance story is primarily about `rbxl/native`.
+
+`require "rbxl"` remains the portability-first default: no native extension is
+required, the API stays the same, and the fallback path is still useful for
+environments where native builds are inconvenient. But the numbers below are
+best read as:
+
+- `rbxl` = portable baseline
+- `rbxl/native` = performance mode
+
 5000 rows x 10 columns, Ruby 3.4 / Python 3.13 / Node 24:
 
 ![Benchmark chart](benchmark/chart.png)
 
-### Pure Ruby (Nokogiri Reader)
+### Portable Baseline (`require "rbxl"`)
 
 | benchmark | real (s) |
 |---|---|
@@ -135,7 +145,7 @@ RBXL_BENCH_WARMUP=1 RBXL_BENCH_ITERATIONS=5 ruby -Ilib benchmark/read_modes.rb
 | openpyxl read | 0.22 |
 | openpyxl read values | 0.18 |
 
-### With `rbxl/native`
+### Performance Mode (`require "rbxl/native"`)
 
 | benchmark | real (s) | vs exceljs/openpyxl |
 |---|---|---|
@@ -157,5 +167,8 @@ Benchmark notes:
 - `rbxl` for write/read
 - `exceljs` for write/read
 - `sheetjs` for write/read
+- `excelize` (Go) for write/read
+- `rust_xlsxwriter` (Rust) for write
+- `calamine` (Rust) for read
 - `rubyXL` for full workbook read
 - `openpyxl` as a Python reference point when `openpyxl` or `uv` is available

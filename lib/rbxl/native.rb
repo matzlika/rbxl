@@ -1,3 +1,5 @@
+require "nokogiri"
+
 begin
   require "rbxl_native/rbxl_native"
 rescue LoadError

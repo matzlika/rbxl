@@ -187,6 +187,48 @@ rescue LoadError, StandardError => e
   []
 end
 
+def run_go_helper(read_path:)
+  helper_dir = File.expand_path("go_compare", __dir__)
+  env = {
+    "RBXL_BENCH_READ_PATH" => read_path,
+    "GOCACHE" => File.join(Dir.tmpdir, "rbxl-go-cache"),
+    "GOMODCACHE" => File.join(Dir.tmpdir, "rbxl-go-modcache")
+  }
+  command = ["go", "run", "."]
+
+  output = IO.popen(env, command, chdir: helper_dir, &:read)
+  raise "go benchmark failed" unless $?.success?
+
+  JSON.parse(output, symbolize_names: true)
+rescue Errno::ENOENT
+  []
+rescue LoadError, StandardError => e
+  raise e if e.message.include?("go benchmark failed")
+
+  []
+end
+
+def run_rust_helper(read_path:)
+  helper_dir = File.expand_path("rust_compare", __dir__)
+  env = {
+    "RBXL_BENCH_READ_PATH" => read_path,
+    "CARGO_HOME" => File.join(Dir.tmpdir, "rbxl-cargo-home"),
+    "CARGO_TARGET_DIR" => File.join(Dir.tmpdir, "rbxl-cargo-target")
+  }
+  command = ["cargo", "run", "--quiet"]
+
+  output = IO.popen(env, command, chdir: helper_dir, &:read)
+  raise "rust benchmark failed" unless $?.success?
+
+  JSON.parse(output, symbolize_names: true)
+rescue Errno::ENOENT
+  []
+rescue LoadError, StandardError => e
+  raise e if e.message.include?("rust benchmark failed")
+
+  []
+end
+
 Dir.mktmpdir("rbxl-compare-") do |dir|
   header, body = build_dataset(rows: ROWS, cols: COLS)
   results = []
@@ -227,6 +269,18 @@ Dir.mktmpdir("rbxl-compare-") do |dir|
     results.concat(run_js_helper(read_path: rbxl_path))
   rescue StandardError => e
     warn "js benchmark skipped: #{e.message}"
+  end
+
+  begin
+    results.concat(run_go_helper(read_path: rbxl_path))
+  rescue StandardError => e
+    warn "go benchmark skipped: #{e.message}"
+  end
+
+  begin
+    results.concat(run_rust_helper(read_path: rbxl_path))
+  rescue StandardError => e
+    warn "rust benchmark skipped: #{e.message}"
   end
 
   label_width = results.map { |row| row[:label].length }.max

@@ -1,46 +1,35 @@
 require "mkmf"
 
-# Try to find libxml2 headers and library.
-# Priority:
-#   1. Nokogiri's bundled libxml2 (avoids version mismatch warnings)
-#   2. System pkg-config
-#   3. Common system paths
-#
-# If libxml2 is not available at all, skip compilation gracefully so
-# that `gem install rbxl` never fails — the C extension is optional.
+# The extension is intentionally built against Nokogiri's vendored libxml2.
+# We only borrow Nokogiri's headers at build time and rely on Nokogiri's
+# extension to export the libxml2 symbols at runtime. Linking against the
+# system libxml2 here would reintroduce mixed-version warnings and can lead
+# to process instability.
 
-found = false
-
-# 1. Try Nokogiri's bundled libxml2
 begin
-  nokogiri_spec = Gem::Specification.find_by_name("nokogiri")
-  nokogiri_include = File.join(nokogiri_spec.full_gem_path, "ext", "nokogiri", "include", "libxml2")
-  nokogiri_lib = File.join(nokogiri_spec.full_gem_path, "ext", "nokogiri")
-
-  if File.directory?(nokogiri_include) && find_header("libxml/parser.h", nokogiri_include)
-    # Link against Nokogiri's bundled libxml2
-    nokogiri_so = Dir.glob(File.join(nokogiri_lib, "**", "nokogiri.{so,bundle}")).first
-    if nokogiri_so
-      so_dir = File.dirname(nokogiri_so)
-      $LDFLAGS << " -L#{so_dir} -Wl,-rpath,#{so_dir}"
-    end
-    found = have_library("xml2") || true # headers found via Nokogiri, may link at runtime
-  end
-rescue Gem::MissingSpecError
-  # Nokogiri not installed — fall through
-end
-
-# 2. System pkg-config
-found ||= pkg_config("libxml-2.0")
-
-# 3. Common system paths
-found ||= (have_header("libxml/parser.h") && have_library("xml2"))
-found ||= (find_header("libxml/parser.h", "/usr/include/libxml2") && have_library("xml2"))
-
-unless found
-  warn "rbxl_native: libxml2 not found — skipping C extension build"
+  require "nokogiri"
+rescue LoadError
+  warn "rbxl_native: nokogiri is required to build the C extension"
   File.write("Makefile", "all install clean:\n\t@:\n")
   exit 0
+end
+
+nokogiri_cppflags = Array(Nokogiri::VERSION_INFO.dig("nokogiri", "cppflags"))
+nokogiri_ldflags = Array(Nokogiri::VERSION_INFO.dig("nokogiri", "ldflags"))
+
+$CPPFLAGS = [*nokogiri_cppflags, $CPPFLAGS].reject(&:empty?).join(" ")
+$LDFLAGS = [*nokogiri_ldflags, $LDFLAGS].reject(&:empty?).join(" ")
+
+unless have_header("libxml/parser.h")
+  warn "rbxl_native: failed to find Nokogiri libxml2 headers"
+  File.write("Makefile", "all install clean:\n\t@:\n")
+  exit 0
+end
+
+# macOS refuses unresolved references in shared objects unless explicitly told
+# to leave them for runtime lookup in already-loaded extensions like Nokogiri.
+if RUBY_PLATFORM.include?("darwin")
+  append_ldflags("-Wl,-undefined,dynamic_lookup")
 end
 
 # Hardening flags

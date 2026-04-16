@@ -11,12 +11,15 @@ matplotlib.use("Agg")
 categories = ["write", "read", "read\nvalues_only"]
 
 data = {
-    "rbxl + native":    [0.039, 0.068, 0.027],
+    "rbxl + native":    [0.039, 0.073, 0.032],
     "rbxl (pure Ruby)": [0.085, 0.327, 0.227],
-    "exceljs":          [0.078, 0.177, None],
-    "sheetjs":          [0.133, 0.187, None],
+    "excelize":         [0.156, 0.147, None],
+    "rust_xlsxwriter":  [0.579, None, None],
+    "calamine":         [None, 0.474, None],
+    "exceljs":          [0.081, 0.181, None],
+    "sheetjs":          [0.139, 0.190, None],
     "openpyxl":         [0.353, 0.216, 0.184],
-    "rubyXL":           [2.041, 2.064, None],
+    "rubyXL":           [2.041, 2.000, None],
 }
 
 # None = library does not support this mode
@@ -25,6 +28,9 @@ data = {
 colors = {
     "rbxl + native":    "#2563eb",
     "rbxl (pure Ruby)": "#60a5fa",
+    "excelize":         "#0f766e",
+    "rust_xlsxwriter":  "#b45309",
+    "calamine":         "#92400e",
     "exceljs":          "#f97316",
     "sheetjs":          "#22c55e",
     "openpyxl":         "#f59e0b",
@@ -33,16 +39,19 @@ colors = {
 
 # Footnotes for missing data
 notes = {
+    "excelize": "no values_only benchmark",
+    "rust_xlsxwriter": "write-only benchmark",
+    "calamine": "read-only benchmark",
     "exceljs": "no values_only benchmark",
     "sheetjs": "no values_only benchmark",
     "rubyXL": "no values_only",
 }
 
 libs = list(data.keys())
-max_y = 0.42
-bar_width = 0.11
+max_y = 0.65
+bar_width = 0.095
 
-fig, ax = plt.subplots(figsize=(11, 5.8))
+fig, ax = plt.subplots(figsize=(12.5, 6.2))
 
 # For each category, only place bars that have data, centered
 for cat_idx, cat in enumerate(categories):
