@@ -120,6 +120,42 @@ create_fixture(File.join(fixtures_dir, "shared_strings.xlsx")) do |zip|
   XML
 end
 
+create_fixture(File.join(fixtures_dir, "phonetic_shared_strings.xlsx")) do |zip|
+  write_entry(zip, "[Content_Types].xml", content_types_xml(%(<Override PartName="/xl/sharedStrings.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sharedStrings+xml"/>)))
+  write_entry(zip, "_rels/.rels", root_rels_xml)
+  write_entry(zip, "xl/workbook.xml", workbook_xml("Phonetic"))
+  write_entry(zip, "xl/_rels/workbook.xml.rels", workbook_rels_xml(%(<Relationship Id="rId3" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/sharedStrings" Target="sharedStrings.xml"/>)))
+  write_entry(zip, "xl/styles.xml", default_styles_xml)
+  write_entry(zip, "xl/sharedStrings.xml", <<~XML.chomp)
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <sst xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" count="2" uniqueCount="2">
+      <si>
+        <t>東京駅</t>
+        <rPh sb="0" eb="2"><t xml:space="preserve">トウキョウ </t></rPh>
+        <rPh sb="2" eb="3"><t xml:space="preserve">エキ </t></rPh>
+        <phoneticPr fontId="2"/>
+      </si>
+      <si>
+        <r><t>青</t></r>
+        <r><t>空</t></r>
+        <rPh sb="0" eb="1"><t xml:space="preserve">アオ </t></rPh>
+        <rPh sb="1" eb="2"><t xml:space="preserve">ゾラ </t></rPh>
+        <phoneticPr fontId="2"/>
+      </si>
+    </sst>
+  XML
+  write_entry(zip, "xl/worksheets/sheet1.xml", <<~XML.chomp)
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+      <dimension ref="A1:A2"/>
+      <sheetData>
+        <row r="1"><c r="A1" t="s"><v>0</v></c></row>
+        <row r="2"><c r="A2" t="s"><v>1</v></c></row>
+      </sheetData>
+    </worksheet>
+  XML
+end
+
 create_fixture(File.join(fixtures_dir, "no_dimension.xlsx")) do |zip|
   write_entry(zip, "[Content_Types].xml", content_types_xml)
   write_entry(zip, "_rels/.rels", root_rels_xml)
@@ -208,6 +244,33 @@ create_fixture(File.join(fixtures_dir, "file_item_error.xlsx")) do |zip|
       <sheetData>
         <row r="1"><c r="A1" t="inlineStr"><is><t>ok</t></is></c></row>
       </sheetData>
+    </worksheet>
+  XML
+end
+
+create_fixture(File.join(fixtures_dir, "merged_cells.xlsx")) do |zip|
+  write_entry(zip, "[Content_Types].xml", content_types_xml)
+  write_entry(zip, "_rels/.rels", root_rels_xml)
+  write_entry(zip, "xl/workbook.xml", workbook_xml("Merged"))
+  write_entry(zip, "xl/_rels/workbook.xml.rels", workbook_rels_xml)
+  write_entry(zip, "xl/styles.xml", default_styles_xml)
+  write_entry(zip, "xl/worksheets/sheet1.xml", <<~XML.chomp)
+    <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+    <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
+      <dimension ref="A1:D2"/>
+      <sheetData>
+        <row r="1">
+          <c r="A1" t="inlineStr"><is><t>group</t></is></c>
+          <c r="C1" t="inlineStr"><is><t>solo</t></is></c>
+        </row>
+        <row r="2">
+          <c r="D2" t="inlineStr"><is><t>tail</t></is></c>
+        </row>
+      </sheetData>
+      <mergeCells count="2">
+        <mergeCell ref="A1:B2"/>
+        <mergeCell ref="C1:C2"/>
+      </mergeCells>
     </worksheet>
   XML
 end

@@ -242,6 +242,16 @@ class RbxlTest < Minitest::Test
     loaded.close
   end
 
+  def test_shared_strings_ignore_phonetic_runs
+    loaded = Rbxl.open(fixture_path("phonetic_shared_strings.xlsx"), read_only: true)
+    rows = loaded.sheet("Phonetic").rows(values_only: true).to_a
+
+    assert_equal [["東京駅"], ["青空"]], rows
+    refute_includes rows.flatten.join(" "), "トウキョウ"
+    refute_includes rows.flatten.join(" "), "アオ"
+    loaded.close
+  end
+
   def test_calculate_dimension_force_handles_sheet_without_dimension_node
     loaded = Rbxl.open(fixture_path("no_dimension.xlsx"), read_only: true)
     sheet = loaded.sheet("NoDimension")
@@ -277,6 +287,29 @@ class RbxlTest < Minitest::Test
 
     assert_equal ["BrokenRels"], loaded.sheet_names
     assert_equal [["ok"]], loaded.sheet("BrokenRels").rows(values_only: true).to_a
+    loaded.close
+  end
+
+  def test_expand_merged_fills_values_only_rows_without_changing_default_behavior
+    loaded = Rbxl.open(fixture_path("merged_cells.xlsx"), read_only: true)
+    sheet = loaded.sheet("Merged")
+
+    assert_equal [["group", "solo"], ["tail"]], sheet.rows(values_only: true).to_a
+    assert_equal [["group", nil, "solo", nil], [nil, nil, nil, "tail"]], sheet.rows(values_only: true, pad_cells: true).to_a
+    assert_equal [["group", "group", "solo", nil], ["group", "group", "solo", "tail"]], sheet.rows(values_only: true, pad_cells: true, expand_merged: true).to_a
+
+    loaded.close
+  end
+
+  def test_expand_merged_fills_cell_objects
+    loaded = Rbxl.open(fixture_path("merged_cells.xlsx"), read_only: true)
+    row = loaded.sheet("Merged").each_row(pad_cells: true, expand_merged: true).to_a.last
+
+    assert_equal ["group", "group", "solo", "tail"], row.values
+    assert_equal "A2", row[0].coordinate
+    assert_equal "B2", row[1].coordinate
+    assert_equal "C2", row[2].coordinate
+
     loaded.close
   end
 

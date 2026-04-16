@@ -96,19 +96,19 @@ Current reference result on this machine with `RBXL_BENCH_ROWS=5000` and
 
 ```text
 benchmark                 real_s  rss_delta_kb    file_bytes
-rbxl write                0.1343         12456        193193
-rbxl read                 0.3168          4160             -
-rbxl read values          0.2695         -1564             -
-caxlsx write              0.4956          4216        198420
-roo read                  1.1123         17332             -
-rubyXL read               2.0007        134360             -
-openpyxl write            0.4191          1124        194410
-openpyxl read             0.2914          1304             -
-openpyxl read values      0.2541           512             -
+rbxl write                0.1303         12440        193193
+rbxl read                 0.4415          1012             -
+rbxl read values          0.3947          1236             -
+caxlsx write              0.4943          4152        198420
+roo read                  1.1326         17808             -
+rubyXL read               1.9982        140736             -
+openpyxl write            0.4291             0        194411
+openpyxl read             0.3422             0             -
+openpyxl read values      0.2626             0             -
 ```
 
 Interpretation:
 
 - `rbxl` write is currently faster than `caxlsx` and `openpyxl` in this benchmark.
-- `rbxl` read is close to `openpyxl` and faster than `roo` and `rubyXL`.
-- `rbxl` read with `values_only` is especially close to `openpyxl` read with `values_only`.
+- `rbxl` read is still slower than `openpyxl`, but faster than `roo` and `rubyXL`.
+- `rbxl` read with `values_only` remains materially closer to `openpyxl` than the other Ruby readers here.

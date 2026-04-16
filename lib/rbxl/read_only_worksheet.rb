@@ -13,10 +13,12 @@ module Rbxl
       @shared_strings = shared_strings
       @name = name
       @dimensions = extract_dimensions
+      @merge_ranges_by_row = nil
+      @merge_anchor_values = {}
     end
 
-    def each_row(pad_cells: false, values_only: false)
-      return enum_for(:each_row, pad_cells: pad_cells, values_only: values_only) unless block_given?
+    def each_row(pad_cells: false, values_only: false, expand_merged: false)
+      return enum_for(:each_row, pad_cells: pad_cells, values_only: values_only, expand_merged: expand_merged) unless block_given?
 
       current_row_index = nil
       last_row_index = 0
@@ -69,6 +71,7 @@ module Rbxl
               raw_value = nil
             when "row"
               current_cells = pad_row(current_cells, current_row_index, values_only: values_only) if pad_cells
+              current_cells = expand_merged_cells(current_cells, current_row_index, values_only: values_only) if expand_merged
               yield values_only ? extract_values(current_cells).freeze : Row.new(index: current_row_index, cells: current_cells)
               last_row_index = current_row_index
               current_row_index = nil
@@ -79,8 +82,8 @@ module Rbxl
       end
     end
 
-    def rows(values_only: false)
-      each_row(values_only: values_only)
+    def rows(values_only: false, pad_cells: false, expand_merged: false)
+      each_row(values_only: values_only, pad_cells: pad_cells, expand_merged: expand_merged)
     end
 
     def max_column
@@ -132,6 +135,25 @@ module Rbxl
       nil
     end
 
+    def extract_merge_ranges_by_row
+      ranges_by_row = Hash.new { |hash, key| hash[key] = [] }
+
+      with_sheet_reader do |reader|
+        reader.each do |node|
+          next unless node.node_type == ELEMENT_NODE && node.local_name == "mergeCell"
+
+          range = parse_merge_range(node.attribute("ref"))
+          next unless range
+
+          (range[:start_row]..range[:end_row]).each do |row|
+            ranges_by_row[row] << range
+          end
+        end
+      end
+
+      ranges_by_row
+    end
+
     def scan_dimensions
       max_col = nil
       max_row = nil
@@ -161,6 +183,22 @@ module Rbxl
       finish_ref ||= start_ref
       _, _, max_col, max_row = *range_bounds(start_ref, finish_ref)
       { ref: reference, max_col: max_col, max_row: max_row }
+    end
+
+    def parse_merge_range(reference)
+      return nil if reference.nil? || reference.empty?
+
+      start_ref, finish_ref = reference.split(":", 2)
+      finish_ref ||= start_ref
+      start_col, start_row, end_col, end_row = *range_bounds(start_ref, finish_ref)
+      return nil unless start_col && start_row && end_col && end_row
+
+      {
+        start_col: start_col,
+        start_row: start_row,
+        end_col: end_col,
+        end_row: end_row
+      }
     end
 
     def range_bounds(start_ref, finish_ref)
@@ -198,6 +236,59 @@ module Rbxl
       (1..dimensions[:max_col]).map do |col|
         by_column[col] || (values_only ? [nil, nil] : EmptyCell.new(coordinate: "#{column_name(col)}#{row_index}"))
       end
+    end
+
+    def expand_merged_cells(cells, row_index, values_only:)
+      merge_ranges = merge_ranges_by_row[row_index]
+      return cells if merge_ranges.empty?
+
+      expanded_cells = cells.dup
+
+      merge_ranges.each do |range|
+        if row_index == range[:start_row]
+          @merge_anchor_values[range] = value_at(expanded_cells, range[:start_col], values_only: values_only)
+        end
+
+        anchor_value = @merge_anchor_values[range]
+        next if anchor_value.nil?
+
+        (range[:start_col]..range[:end_col]).each do |col|
+          next if row_index == range[:start_row] && col == range[:start_col]
+
+          expanded_cells = set_value_at(expanded_cells, row_index, col, anchor_value, values_only: values_only)
+        end
+      end
+
+      expanded_cells
+    end
+
+    def value_at(cells, col_index, values_only:)
+      cell = cells[col_index - 1]
+      return nil unless cell
+
+      if values_only
+        cell[1]
+      elsif cell.is_a?(EmptyCell)
+        nil
+      else
+        cell.value
+      end
+    end
+
+    def set_value_at(cells, row_index, col_index, value, values_only:)
+      coordinate = "#{column_name(col_index)}#{row_index}"
+
+      if values_only
+        cells[col_index - 1] = [coordinate, value]
+      else
+        cells[col_index - 1] = ReadOnlyCell.new(coordinate, value)
+      end
+
+      cells
+    end
+
+    def merge_ranges_by_row
+      @merge_ranges_by_row ||= extract_merge_ranges_by_row
     end
 
     def coerce_value(raw_value, type)

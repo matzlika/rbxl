@@ -53,11 +53,7 @@ module Rbxl
       xml = REXML::Document.new(entry.get_input_stream.read)
       strings = []
       REXML::XPath.each(xml, "//main:si", { "main" => MAIN_NS }) do |node|
-        fragments = []
-        REXML::XPath.each(node, ".//main:t", { "main" => MAIN_NS }) do |text_node|
-          fragments << text_node.text.to_s
-        end
-        strings << fragments.join
+        strings << shared_string_text(node)
       end
       strings
     end
@@ -83,6 +79,24 @@ module Rbxl
 
     def read_entry(name)
       @zip.get_entry(name).get_input_stream.read
+    end
+
+    def shared_string_text(node)
+      fragments = []
+
+      node.children.each do |child|
+        next unless child.is_a?(REXML::Element)
+
+        case child.name
+        when "t"
+          fragments << child.text.to_s
+        when "r"
+          text = REXML::XPath.first(child, "./main:t", { "main" => MAIN_NS })
+          fragments << text.text.to_s if text
+        end
+      end
+
+      fragments.join
     end
   end
 end
