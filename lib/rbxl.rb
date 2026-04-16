@@ -53,7 +53,25 @@ require_relative "rbxl/write_only_worksheet"
 # worksheet XML paths for a libxml2-backed C implementation with the same
 # observable behavior. See the README for build requirements.
 module Rbxl
+  # Maximum number of shared strings accepted from a workbook's
+  # +xl/sharedStrings.xml+ entry. Defaults to 10 million, which comfortably
+  # covers real-world enterprise workbooks while rejecting files crafted to
+  # exhaust memory before any row is read. Set to +nil+ to disable.
+  @max_shared_strings = 10_000_000
+
+  # Maximum total byte size of the shared strings table once decoded.
+  # Defaults to 512 MiB. Applied both to the ZIP entry's declared
+  # uncompressed size (cheap early rejection of zip bombs) and to the
+  # running sum while parsing. Set to +nil+ to disable.
+  @max_shared_string_bytes = 512 * 1024 * 1024
+
   class << self
+    # @return [Integer, nil] configured shared-strings count cap
+    attr_accessor :max_shared_strings
+
+    # @return [Integer, nil] configured shared-strings byte cap
+    attr_accessor :max_shared_string_bytes
+
     # Opens an existing workbook in read-only streaming mode.
     #
     # The +read_only+ keyword is required and must be +true+. It exists to

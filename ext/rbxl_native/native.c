@@ -408,9 +408,16 @@ static VALUE run_parse(parse_ctx *ctx, VALUE xml_str)
         rb_raise(rb_eRuntimeError, "failed to create libxml2 parser context");
     }
 
-    /* Disable network access and limit entity expansion */
-    xmlCtxtUseOptions(parser,
-        XML_PARSE_NONET | XML_PARSE_NOENT | XML_PARSE_HUGE);
+    /* XXE / entity-expansion defense:
+     *   - NONET: no network access
+     *   - NOENT omitted: user-defined entities are NOT substituted, so
+     *     external entities are never resolved and billion-laughs style
+     *     expansion cannot trigger. Predefined entities (&amp; etc.) still
+     *     reach the characters callback via libxml2's default SAX2 handler.
+     *   - HUGE omitted: keep libxml2's built-in parser limits active.
+     *   Real xlsx files stay well under these limits (Excel caps cell text
+     *   at 32,767 chars), so no throughput loss. */
+    xmlCtxtUseOptions(parser, XML_PARSE_NONET);
 
     parse_args args = { ctx, parser, RSTRING_PTR(xml_str), RSTRING_LEN(xml_str) };
 

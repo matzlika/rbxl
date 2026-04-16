@@ -20,4 +20,11 @@ module Rbxl
   # lacks a stored +<dimension>+ element and the caller has not opted into
   # scanning the worksheet with <tt>force: true</tt>.
   class UnsizedWorksheetError < Error; end
+
+  # Raised when the shared strings table in an opened workbook exceeds the
+  # configured count or byte limits (see {Rbxl.max_shared_strings} and
+  # {Rbxl.max_shared_string_bytes}). Guards against malicious or malformed
+  # +.xlsx+ files that would otherwise exhaust memory before the first row
+  # is read.
+  class SharedStringsTooLargeError < Error; end
 end

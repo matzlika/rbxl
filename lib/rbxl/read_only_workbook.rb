@@ -102,7 +102,18 @@ module Rbxl
       entry = @zip.find_entry("xl/sharedStrings.xml")
       return [] unless entry
 
+      max_count = Rbxl.max_shared_strings
+      max_bytes = Rbxl.max_shared_string_bytes
+
+      # Reject zip-bomb style entries up front using the ZIP directory's
+      # declared uncompressed size, before allocating any decompression buffer.
+      if max_bytes && entry.size && entry.size > max_bytes
+        raise SharedStringsTooLargeError,
+              "shared strings uncompressed size #{entry.size} exceeds limit #{max_bytes}"
+      end
+
       strings = []
+      total_bytes = 0
       io = entry.get_input_stream
       reader = Nokogiri::XML::Reader(io)
 
@@ -144,7 +155,17 @@ module Rbxl
           when "rPh"
             in_phonetic = false
           when "si"
-            strings << current_fragments.join.freeze
+            value = current_fragments.join.freeze
+            total_bytes += value.bytesize
+            if max_bytes && total_bytes > max_bytes
+              raise SharedStringsTooLargeError,
+                    "shared strings total size exceeds limit #{max_bytes}"
+            end
+            strings << value
+            if max_count && strings.size > max_count
+              raise SharedStringsTooLargeError,
+                    "shared strings count exceeds limit #{max_count}"
+            end
             in_si = false
             in_run = false
             in_phonetic = false
