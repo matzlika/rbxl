@@ -96,15 +96,15 @@ Current reference result on this machine with `RBXL_BENCH_ROWS=5000` and
 
 ```text
 benchmark                 real_s  rss_delta_kb    file_bytes
-rbxl write                0.1303         12440        193193
-rbxl read                 0.4415          1012             -
-rbxl read values          0.3947          1236             -
-caxlsx write              0.4943          4152        198420
-roo read                  1.1326         17808             -
-rubyXL read               1.9982        140736             -
-openpyxl write            0.4291             0        194411
-openpyxl read             0.3422             0             -
-openpyxl read values      0.2626             0             -
+rbxl write                0.1302         12500        193193
+rbxl read                 0.4266           912             -
+rbxl read values          0.3950          1472             -
+caxlsx write              0.4841          4224        198420
+roo read                  1.0783         17556             -
+rubyXL read               2.0921        129180             -
+openpyxl write            0.4315             0        194414
+openpyxl read             0.2837             0             -
+openpyxl read values      0.2553             0             -
 ```
 
 Interpretation:

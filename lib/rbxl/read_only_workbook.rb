@@ -50,12 +50,60 @@ module Rbxl
       entry = @zip.find_entry("xl/sharedStrings.xml")
       return [] unless entry
 
-      xml = REXML::Document.new(entry.get_input_stream.read)
       strings = []
-      REXML::XPath.each(xml, "//main:si", { "main" => MAIN_NS }) do |node|
-        strings << shared_string_text(node)
+      io = entry.get_input_stream
+      reader = Nokogiri::XML::Reader(io)
+
+      in_si = false
+      in_run = false
+      in_phonetic = false
+      collecting_text = false
+      buffer = +""
+      current_fragments = []
+
+      reader.each do |node|
+        case node.node_type
+        when Nokogiri::XML::Reader::TYPE_ELEMENT
+          case node.local_name
+          when "si"
+            in_si = true
+            current_fragments = []
+          when "r"
+            in_run = true if in_si
+          when "rPh"
+            in_phonetic = true if in_si
+          when "t"
+            next unless in_si && !in_phonetic
+
+            collecting_text = !in_run || node.depth.positive?
+            buffer.clear if collecting_text
+          end
+        when Nokogiri::XML::Reader::TYPE_TEXT, Nokogiri::XML::Reader::TYPE_CDATA
+          buffer << node.value if collecting_text
+        when Nokogiri::XML::Reader::TYPE_END_ELEMENT
+          case node.local_name
+          when "t"
+            if collecting_text
+              current_fragments << buffer.dup
+              collecting_text = false
+            end
+          when "r"
+            in_run = false
+          when "rPh"
+            in_phonetic = false
+          when "si"
+            strings << current_fragments.join
+            in_si = false
+            in_run = false
+            in_phonetic = false
+            collecting_text = false
+          end
+        end
       end
+
       strings
+    ensure
+      io&.close
     end
 
     def load_sheet_entries
@@ -79,24 +127,6 @@ module Rbxl
 
     def read_entry(name)
       @zip.get_entry(name).get_input_stream.read
-    end
-
-    def shared_string_text(node)
-      fragments = []
-
-      node.children.each do |child|
-        next unless child.is_a?(REXML::Element)
-
-        case child.name
-        when "t"
-          fragments << child.text.to_s
-        when "r"
-          text = REXML::XPath.first(child, "./main:t", { "main" => MAIN_NS })
-          fragments << text.text.to_s if text
-        end
-      end
-
-      fragments.join
     end
   end
 end
