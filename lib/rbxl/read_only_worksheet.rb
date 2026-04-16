@@ -1,5 +1,5 @@
 module Rbxl
-  # Streaming worksheet reader for a single sheet of a read-only workbook.
+  # Row-by-row worksheet reader for a single sheet of a read-only workbook.
   #
   # Instances are produced by {Rbxl::ReadOnlyWorkbook#sheet} and must not be
   # constructed directly; their lifecycle is bound to the workbook's ZIP
@@ -52,11 +52,15 @@ module Rbxl
     # @param entry_path [String] ZIP entry path for this sheet's XML
     # @param shared_strings [Array<String>] pre-decoded shared strings table
     # @param name [String] visible sheet name
-    def initialize(zip:, entry_path:, shared_strings:, name:)
+    # @param streaming [Boolean] when the native extension is loaded, feed
+    #   worksheet XML to the parser in chunks instead of reading the entry
+    #   into memory first
+    def initialize(zip:, entry_path:, shared_strings:, name:, streaming: false)
       @zip = zip
       @entry_path = entry_path
       @shared_strings = shared_strings
       @name = name
+      @streaming = streaming
       @dimensions = extract_dimensions
       @merge_ranges_by_row = nil
       @merge_anchor_values = {}
@@ -150,8 +154,12 @@ module Rbxl
 
     def each_row_values_only(&block)
       if defined?(Rbxl::Native) && !@disable_native
-        xml = @zip.get_entry(@entry_path).get_input_stream.read
-        Rbxl::Native.parse_sheet(xml, @shared_strings, &block)
+        if @streaming
+          native_parse_streaming(:parse_sheet_io, &block)
+        else
+          xml = @zip.get_entry(@entry_path).get_input_stream.read
+          Rbxl::Native.parse_sheet(xml, @shared_strings, &block)
+        end
         return
       end
 
@@ -209,8 +217,12 @@ module Rbxl
 
     def each_row_full(pad_cells:, values_only:, expand_merged:, &block)
       if defined?(Rbxl::Native) && !@disable_native && !pad_cells && !expand_merged && !values_only
-        xml = @zip.get_entry(@entry_path).get_input_stream.read
-        Rbxl::Native.parse_sheet_full(xml, @shared_strings, &block)
+        if @streaming
+          native_parse_streaming(:parse_sheet_full_io, &block)
+        else
+          xml = @zip.get_entry(@entry_path).get_input_stream.read
+          Rbxl::Native.parse_sheet_full(xml, @shared_strings, &block)
+        end
         return
       end
 
@@ -288,6 +300,18 @@ module Rbxl
       io = @zip.get_entry(@entry_path).get_input_stream
       reader = Nokogiri::XML::Reader(io)
       yield reader
+    ensure
+      io&.close
+    end
+
+    def native_parse_streaming(method_name, &block)
+      io = @zip.get_entry(@entry_path).get_input_stream
+      max_bytes = Rbxl.max_worksheet_bytes
+      Rbxl::Native.public_send(method_name, io, @shared_strings, max_bytes, &block)
+    rescue RuntimeError => e
+      raise WorksheetTooLargeError, e.message if e.message&.include?("worksheet bytes exceed limit")
+
+      raise
     ensure
       io&.close
     end

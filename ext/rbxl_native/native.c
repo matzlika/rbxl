@@ -359,11 +359,15 @@ static void on_characters(void *ctx, const xmlChar *ch, int len)
 /* Ensure-style cleanup wrapper                                        */
 /* ------------------------------------------------------------------ */
 
+#define IO_READ_CHUNK_BYTES (64 * 1024)
+
 typedef struct {
     parse_ctx     *ctx;
     xmlParserCtxtPtr parser;
-    const char    *data;
-    long           data_len;
+    const char    *data;      /* string mode only */
+    long           data_len;  /* string mode only */
+    VALUE          io;        /* io mode only (Qnil in string mode) */
+    long           max_bytes; /* io mode cap; 0 = unbounded */
 } parse_args;
 
 static VALUE do_parse(VALUE arg)
@@ -372,6 +376,39 @@ static VALUE do_parse(VALUE arg)
 
     xmlParseChunk(a->parser, a->data, (int)a->data_len, 1 /* terminate */);
 
+    return Qnil;
+}
+
+static VALUE do_parse_io(VALUE arg)
+{
+    parse_args *a = (parse_args *)arg;
+    static ID id_read = 0;
+    if (!id_read) id_read = rb_intern("read");
+    VALUE chunk_size = INT2NUM(IO_READ_CHUNK_BYTES);
+    long total = 0;
+
+    while (1) {
+        VALUE chunk = rb_funcall(a->io, id_read, 1, chunk_size);
+        if (NIL_P(chunk)) break;
+        Check_Type(chunk, T_STRING);
+
+        long n = RSTRING_LEN(chunk);
+        if (n == 0) break;
+
+        total += n;
+        if (a->max_bytes > 0 && total > a->max_bytes) {
+            a->ctx->error = 1;
+            snprintf(a->ctx->error_msg, sizeof(a->ctx->error_msg),
+                     "worksheet bytes exceed limit (%ld)", a->max_bytes);
+            break;
+        }
+
+        xmlParseChunk(a->parser, RSTRING_PTR(chunk), (int)n, 0);
+        if (a->ctx->error) break;
+    }
+
+    /* Terminate the parser so any trailing buffered state flushes. */
+    xmlParseChunk(a->parser, NULL, 0, 1);
     return Qnil;
 }
 
@@ -392,7 +429,7 @@ static VALUE cleanup_parse(VALUE arg)
 /* Common parse setup                                                  */
 /* ------------------------------------------------------------------ */
 
-static VALUE run_parse(parse_ctx *ctx, VALUE xml_str)
+static xmlParserCtxtPtr setup_push_parser(parse_ctx *ctx)
 {
     xmlSAXHandler handler;
     memset(&handler, 0, sizeof(handler));
@@ -418,11 +455,32 @@ static VALUE run_parse(parse_ctx *ctx, VALUE xml_str)
      *   Real xlsx files stay well under these limits (Excel caps cell text
      *   at 32,767 chars), so no throughput loss. */
     xmlCtxtUseOptions(parser, XML_PARSE_NONET);
+    return parser;
+}
 
-    parse_args args = { ctx, parser, RSTRING_PTR(xml_str), RSTRING_LEN(xml_str) };
+static VALUE run_parse(parse_ctx *ctx, VALUE xml_str)
+{
+    xmlParserCtxtPtr parser = setup_push_parser(ctx);
+    parse_args args = { ctx, parser,
+                        RSTRING_PTR(xml_str), RSTRING_LEN(xml_str),
+                        Qnil, 0 };
 
     /* rb_ensure guarantees cleanup even if rb_yield raises */
     rb_ensure(do_parse, (VALUE)&args, cleanup_parse, (VALUE)&args);
+
+    if (ctx->error) {
+        rb_raise(rb_eRuntimeError, "rbxl_native: %s", ctx->error_msg);
+    }
+
+    return INT2NUM(ctx->row_count);
+}
+
+static VALUE run_parse_io(parse_ctx *ctx, VALUE io, long max_bytes)
+{
+    xmlParserCtxtPtr parser = setup_push_parser(ctx);
+    parse_args args = { ctx, parser, NULL, 0, io, max_bytes };
+
+    rb_ensure(do_parse_io, (VALUE)&args, cleanup_parse, (VALUE)&args);
 
     if (ctx->error) {
         rb_raise(rb_eRuntimeError, "rbxl_native: %s", ctx->error_msg);
@@ -478,6 +536,59 @@ static VALUE rb_native_parse_full(VALUE self, VALUE xml_str, VALUE shared_string
     dynbuf_init(&ctx.cell_ref);
 
     return run_parse(&ctx, xml_str);
+}
+
+/* ------------------------------------------------------------------ */
+/* Ruby method: Rbxl::Native.parse_sheet_io(io, shared_strings, max_bytes) */
+/*   Chunk-fed streaming variant of parse_sheet.                        */
+/*   max_bytes may be nil to disable the worksheet byte cap.            */
+/* ------------------------------------------------------------------ */
+
+static VALUE rb_native_parse_io(VALUE self, VALUE io, VALUE shared_strings, VALUE max_bytes)
+{
+    (void)self;
+    Check_Type(shared_strings, T_ARRAY);
+
+    long max = NIL_P(max_bytes) ? 0 : NUM2LONG(max_bytes);
+
+    parse_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.shared_strings     = shared_strings;
+    ctx.shared_strings_len = RARRAY_LEN(shared_strings);
+    ctx.current_row        = Qnil;
+    ctx.full_mode          = 0;
+    dynbuf_init(&ctx.text_buf);
+    dynbuf_init(&ctx.raw_buf);
+
+    return run_parse_io(&ctx, io, max);
+}
+
+/* ------------------------------------------------------------------ */
+/* Ruby method: Rbxl::Native.parse_sheet_full_io(io, shared_strings, max_bytes) */
+/* ------------------------------------------------------------------ */
+
+static VALUE rb_native_parse_full_io(VALUE self, VALUE io, VALUE shared_strings, VALUE max_bytes)
+{
+    (void)self;
+    Check_Type(shared_strings, T_ARRAY);
+
+    long max = NIL_P(max_bytes) ? 0 : NUM2LONG(max_bytes);
+
+    VALUE mRbxl = rb_const_get(rb_cObject, rb_intern("Rbxl"));
+
+    parse_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+    ctx.shared_strings     = shared_strings;
+    ctx.shared_strings_len = RARRAY_LEN(shared_strings);
+    ctx.current_row        = Qnil;
+    ctx.full_mode          = 1;
+    ctx.cReadOnlyCell      = rb_const_get(mRbxl, rb_intern("ReadOnlyCell"));
+    ctx.cRow               = rb_const_get(mRbxl, rb_intern("Row"));
+    dynbuf_init(&ctx.text_buf);
+    dynbuf_init(&ctx.raw_buf);
+    dynbuf_init(&ctx.cell_ref);
+
+    return run_parse_io(&ctx, io, max);
 }
 
 /* ================================================================== */
@@ -680,5 +791,7 @@ void Init_rbxl_native(void)
     VALUE mNative = rb_define_module_under(mRbxl, "Native");
     rb_define_module_function(mNative, "parse_sheet", rb_native_parse, 2);
     rb_define_module_function(mNative, "parse_sheet_full", rb_native_parse_full, 2);
+    rb_define_module_function(mNative, "parse_sheet_io", rb_native_parse_io, 3);
+    rb_define_module_function(mNative, "parse_sheet_full_io", rb_native_parse_full_io, 3);
     rb_define_module_function(mNative, "generate_sheet", rb_native_generate, 1);
 }

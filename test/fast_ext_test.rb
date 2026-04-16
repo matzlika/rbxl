@@ -14,10 +14,32 @@ class FastExtTest < Minitest::Test
     end
   end
 
+  def test_reader_values_only_streaming_matches_default
+    with_test_file do |path|
+      assert_equal read_values_fast(path), read_values_fast_streaming(path)
+    end
+  end
+
   def test_reader_full_matches_nokogiri
     with_test_file do |path|
       expected = read_full_nokogiri(path)
       actual = read_full_fast(path)
+
+      assert_equal expected.size, actual.size
+      expected.zip(actual).each_with_index do |(e_row, a_row), i|
+        assert_equal e_row.index, a_row.index, "row #{i} index"
+        e_row.cells.zip(a_row.cells).each_with_index do |(e_cell, a_cell), j|
+          assert_equal e_cell.coordinate, a_cell.coordinate, "row #{i} cell #{j} coordinate"
+          assert_equal e_cell.value, a_cell.value, "row #{i} cell #{j} value"
+        end
+      end
+    end
+  end
+
+  def test_reader_full_streaming_matches_default
+    with_test_file do |path|
+      expected = read_full_fast(path)
+      actual = read_full_fast_streaming(path)
 
       assert_equal expected.size, actual.size
       expected.zip(actual).each_with_index do |(e_row, a_row), i|
@@ -248,6 +270,20 @@ class FastExtTest < Minitest::Test
 
   def read_full_fast(path)
     wb = Rbxl.open(path, read_only: true)
+    result = wb.sheet(wb.sheet_names.first).rows.to_a
+    wb.close
+    result
+  end
+
+  def read_values_fast_streaming(path)
+    wb = Rbxl.open(path, read_only: true, streaming: true)
+    result = wb.sheet(wb.sheet_names.first).rows(values_only: true).to_a
+    wb.close
+    result
+  end
+
+  def read_full_fast_streaming(path)
+    wb = Rbxl.open(path, read_only: true, streaming: true)
     result = wb.sheet(wb.sheet_names.first).rows.to_a
     wb.close
     result

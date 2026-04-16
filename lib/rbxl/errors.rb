@@ -27,4 +27,10 @@ module Rbxl
   # +.xlsx+ files that would otherwise exhaust memory before the first row
   # is read.
   class SharedStringsTooLargeError < Error; end
+
+  # Raised when a worksheet's XML payload exceeds {Rbxl.max_worksheet_bytes}
+  # while iterating in +streaming: true+ mode. Applies to the uncompressed
+  # bytes consumed from the ZIP entry, so high-compression zip-bomb style
+  # worksheets are stopped mid-inflate rather than after the fact.
+  class WorksheetTooLargeError < Error; end
 end

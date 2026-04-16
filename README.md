@@ -1,10 +1,10 @@
 # rbxl
 
-Fast, memory-friendly Ruby gem for streaming `.xlsx` reads and writes.
+Fast, memory-friendly Ruby gem for row-by-row `.xlsx` reads and append-only writes.
 
 `rbxl` is built for the two workbook workflows that scale cleanly:
 
-- read-only row streaming
+- read-only row-by-row iteration
 - write-only workbook generation
 
 The API is intentionally small and `openpyxl`-inspired, with an optional
@@ -13,7 +13,7 @@ native extension for faster XML parsing when you need more throughput.
 Current scope is intentionally small:
 
 - `write_only` workbook generation
-- `read_only` row streaming
+- `read_only` row-by-row iteration
 - `close()` for read-only workbooks
 - minimal `openpyxl`-like API
 - optional C extension (`rbxl/native`) for maximum performance
@@ -85,9 +85,15 @@ The C extension is **opt-in by design**:
   compile the C extension. If libxml2 is not found, compilation is silently
   skipped and the gem installs successfully without it. You only notice when
   you try `require "rbxl/native"`.
-- **Current boundary cost is explicit**: worksheet ZIP entries are still
+- **Default path buffers the worksheet**: the worksheet ZIP entry is
   inflated into a Ruby string before crossing into C. The extension removes
   XML parse overhead, but not ZIP I/O or that intermediate buffer.
+- **Opt-in streaming**: passing `streaming: true` to `Rbxl.open` feeds the
+  worksheet XML to the native parser in 64 KiB chunks pulled from the ZIP
+  input stream, so peak memory stays roughly independent of sheet size.
+  Pair with `Rbxl.max_worksheet_bytes` to cap uncompressed worksheet
+  inflation and stop high-compression zip-bomb style entries mid-inflate.
+  Throughput is usually within a few percent of the default path.
 
 Requirements for the C extension:
 
@@ -96,7 +102,7 @@ Requirements for the C extension:
 
 ## Design Notes
 
-- Writer avoids a full workbook object graph and streams rows into sheet XML.
+- Writer avoids a full workbook object graph; rows are buffered per sheet and the XML is emitted in a single pass at `save`.
 - Reader uses a pull parser for worksheet XML so it can iterate rows without building the full DOM.
 - Strings written by the MVP use `inlineStr` to avoid shared string bookkeeping during generation.
 - Reader supports both shared strings and inline strings.

@@ -9,8 +9,12 @@ module Rbxl
   type row_cells = Array[row_cell]
   type dimensions = { ref: String, max_col: Integer, max_row: Integer }
 
-  def self.open: (pathish path, ?read_only: bool) -> ReadOnlyWorkbook
+  def self.open: (pathish path, ?read_only: bool, ?streaming: bool) -> ReadOnlyWorkbook
   def self.new: (?write_only: bool) -> WriteOnlyWorkbook
+
+  attr_accessor self.max_shared_strings: Integer?
+  attr_accessor self.max_shared_string_bytes: Integer?
+  attr_accessor self.max_worksheet_bytes: Integer?
 
   class Error < StandardError
   end
@@ -25,6 +29,12 @@ module Rbxl
   end
 
   class UnsizedWorksheetError < Error
+  end
+
+  class SharedStringsTooLargeError < Error
+  end
+
+  class WorksheetTooLargeError < Error
   end
 
   class Cell
@@ -73,8 +83,8 @@ module Rbxl
     attr_reader path: String
     attr_reader sheet_names: Array[String]
 
-    def self.open: (pathish path) -> ReadOnlyWorkbook
-    def initialize: (pathish path) -> void
+    def self.open: (pathish path, ?streaming: bool) -> ReadOnlyWorkbook
+    def initialize: (pathish path, ?streaming: bool) -> void
     def sheet: (String name) -> ReadOnlyWorksheet
     def close: () -> void
     def closed?: () -> bool
@@ -84,7 +94,7 @@ module Rbxl
     attr_reader name: String
     attr_reader dimensions: dimensions?
 
-    def initialize: (zip: untyped, entry_path: String, shared_strings: Array[String], name: String) -> void
+    def initialize: (zip: untyped, entry_path: String, shared_strings: Array[String], name: String, ?streaming: bool) -> void
 
     def each_row: (?pad_cells: bool, ?values_only: bool, ?expand_merged: bool) { (Row | row_values) -> void } -> void
                 | (?pad_cells: bool, ?values_only: bool, ?expand_merged: bool) -> Enumerator[Row | row_values, void]

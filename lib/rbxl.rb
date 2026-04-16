@@ -16,11 +16,11 @@ require_relative "rbxl/write_only_cell"
 require_relative "rbxl/write_only_workbook"
 require_relative "rbxl/write_only_worksheet"
 
-# Minimal streaming XLSX reader/writer inspired by +openpyxl+.
+# Minimal, memory-friendly XLSX reader/writer inspired by +openpyxl+.
 #
 # Rbxl exposes two explicit, non-overlapping modes:
 #
-# * {Rbxl.open} returns a {Rbxl::ReadOnlyWorkbook} for streaming reads
+# * {Rbxl.open} returns a {Rbxl::ReadOnlyWorkbook} for row-by-row reads
 # * {Rbxl.new} returns a {Rbxl::WriteOnlyWorkbook} for one-shot writes
 #
 # The API is intentionally narrow so that memory usage stays predictable
@@ -65,6 +65,13 @@ module Rbxl
   # running sum while parsing. Set to +nil+ to disable.
   @max_shared_string_bytes = 512 * 1024 * 1024
 
+  # Maximum uncompressed byte size accepted from a single worksheet's XML
+  # entry while iterating in +streaming: true+ mode. Default is +nil+
+  # (unbounded) because legitimate worksheets can be arbitrarily large.
+  # Set a positive integer to bound peak inflation and stop high-compression
+  # zip-bomb worksheets mid-inflate.
+  @max_worksheet_bytes = nil
+
   class << self
     # @return [Integer, nil] configured shared-strings count cap
     attr_accessor :max_shared_strings
@@ -72,20 +79,35 @@ module Rbxl
     # @return [Integer, nil] configured shared-strings byte cap
     attr_accessor :max_shared_string_bytes
 
-    # Opens an existing workbook in read-only streaming mode.
+    # @return [Integer, nil] per-worksheet streaming byte cap
+    attr_accessor :max_worksheet_bytes
+
+    # Opens an existing workbook in read-only row-by-row mode.
     #
     # The +read_only+ keyword is required and must be +true+. It exists to
     # mark the intent explicitly and to leave room for a future read/write
     # mode without changing the default behavior of {.open}.
     #
+    # With <tt>streaming: true</tt>, the native backend (when loaded) feeds
+    # worksheet XML to the parser in chunks pulled from the ZIP input stream
+    # instead of materializing the entire worksheet as one Ruby string. This
+    # keeps peak memory roughly independent of worksheet size and lets
+    # {Rbxl.max_worksheet_bytes} bound how much is inflated. Streaming mode
+    # is the same API and output shape — only the inflation strategy
+    # differs — and typically pays back a few percent of throughput on small
+    # sheets in exchange for the flat memory profile.
+    #
     # @param path [String, #to_path] filesystem path to an <tt>.xlsx</tt> file
     # @param read_only [Boolean] must be +true+ for the current API
+    # @param streaming [Boolean] feed worksheet XML to the native parser in
+    #   chunks instead of fully inflating the entry in advance. Ignored when
+    #   the native extension is not loaded.
     # @return [Rbxl::ReadOnlyWorkbook]
     # @raise [ArgumentError] if +read_only+ is not +true+
-    def open(path, read_only: false)
+    def open(path, read_only: false, streaming: false)
       raise ArgumentError, "read_only: true is required for this MVP" unless read_only
 
-      ReadOnlyWorkbook.open(path)
+      ReadOnlyWorkbook.open(path, streaming: streaming)
     end
 
     # Creates a new workbook in write-only mode.

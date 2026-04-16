@@ -166,4 +166,22 @@ class SecurityTest < Minitest::Test
     end
   end
 
+  def test_streaming_worksheet_byte_cap_rejects_oversized_sheet
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "big.xlsx")
+      book = Rbxl.new(write_only: true)
+      sheet = book.add_sheet("S")
+      1_000.times { |i| sheet.append([i, "row-#{i}", i * 1.5]) }
+      book.save(path)
+
+      with_config(max_worksheet_bytes: 1024) do
+        wb = Rbxl.open(path, read_only: true, streaming: true)
+        err = assert_raises(Rbxl::WorksheetTooLargeError) do
+          wb.sheet("S").rows(values_only: true).count
+        end
+        assert_match(/worksheet bytes exceed limit/, err.message)
+        wb.close
+      end
+    end
+  end
 end

@@ -1,7 +1,7 @@
 module Rbxl
   # Immutable cell value object used by the read-only worksheet path.
   #
-  # Produced during streaming iteration when cells are yielded without
+  # Produced during row-by-row iteration when cells are yielded without
   # +values_only+. Implemented as a +Data+ class so instances are frozen and
   # hash-equal by value.
   #

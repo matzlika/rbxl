@@ -1,5 +1,5 @@
 module Rbxl
-  # Write-only workbook for streaming XLSX generation.
+  # Write-only workbook for single-pass XLSX generation.
   #
   # The workbook accumulates rows per worksheet and emits the full
   # <tt>.xlsx</tt> package in a single pass when {#save} is called. By

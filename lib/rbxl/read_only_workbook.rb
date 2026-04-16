@@ -36,28 +36,32 @@ module Rbxl
     # @return [Array<String>] visible sheet names in workbook order
     attr_reader :sheet_names
 
-    # Convenience constructor equivalent to <tt>new(path)</tt>.
+    # Convenience constructor equivalent to <tt>new(path, streaming:)</tt>.
     #
     # @param path [String, #to_path] path to the <tt>.xlsx</tt> file
+    # @param streaming [Boolean] feed worksheet XML to the native parser in
+    #   chunks (see {Rbxl.open})
     # @return [Rbxl::ReadOnlyWorkbook]
-    def self.open(path)
-      new(path)
+    def self.open(path, streaming: false)
+      new(path, streaming: streaming)
     end
 
     # Opens the ZIP archive, pre-loads shared strings, and indexes the
     # worksheet entries keyed by visible sheet name.
     #
     # @param path [String, #to_path] path to the <tt>.xlsx</tt> file
-    def initialize(path)
+    # @param streaming [Boolean] forwarded to produced worksheets
+    def initialize(path, streaming: false)
       @path = path
       @zip = Zip::File.open(path)
+      @streaming = streaming
       @shared_strings = load_shared_strings
       @sheet_entries = load_sheet_entries
       @sheet_names = @sheet_entries.keys.freeze
       @closed = false
     end
 
-    # Returns a streaming worksheet by visible sheet name.
+    # Returns a row-by-row worksheet by visible sheet name.
     #
     # The returned object shares the workbook's ZIP handle. Closing the
     # workbook invalidates any worksheets produced by prior calls.
@@ -73,7 +77,7 @@ module Rbxl
         raise SheetNotFoundError, "sheet not found: #{name}"
       end
 
-      ReadOnlyWorksheet.new(zip: @zip, entry_path: entry_path, shared_strings: @shared_strings, name: name)
+      ReadOnlyWorksheet.new(zip: @zip, entry_path: entry_path, shared_strings: @shared_strings, name: name, streaming: @streaming)
     end
 
     # Releases the underlying ZIP file handle. Idempotent; subsequent calls
