@@ -1,8 +1,6 @@
 require "cgi"
 require "date"
 require "nokogiri"
-require "rexml/document"
-require "rexml/parsers/pullparser"
 require "stringio"
 require "zip"
 

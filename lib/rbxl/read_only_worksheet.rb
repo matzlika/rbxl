@@ -17,68 +17,13 @@ module Rbxl
       @merge_anchor_values = {}
     end
 
-    def each_row(pad_cells: false, values_only: false, expand_merged: false)
-      return enum_for(:each_row, pad_cells: pad_cells, values_only: values_only, expand_merged: expand_merged) unless block_given?
+    def each_row(pad_cells: false, values_only: false, expand_merged: false, &block)
+      return enum_for(:each_row, pad_cells: pad_cells, values_only: values_only, expand_merged: expand_merged) unless block
 
-      current_row_index = nil
-      last_row_index = 0
-      current_cells = nil
-      cell_ref = nil
-      cell_type = nil
-      current_col_index = 0
-      collecting_value = false
-      raw_value = nil
-      value_buffer = +""
-
-      with_sheet_reader do |reader|
-        reader.each do |node|
-          case node.node_type
-          when ELEMENT_NODE
-            case node.local_name
-            when "row"
-              current_row_index = attribute_int(node, "r") || (last_row_index + 1)
-              current_col_index = 0
-              current_cells = []
-            when "c"
-              cell_ref = node.attribute("r")
-              if cell_ref
-                col_index, = split_coordinate(cell_ref)
-                current_col_index = col_index || current_col_index
-              else
-                current_col_index += 1
-                cell_ref = "#{column_name(current_col_index)}#{current_row_index}"
-              end
-              cell_type = node.attribute("t")
-              raw_value = nil
-            when "v", "t"
-              collecting_value = true
-              value_buffer.clear
-            end
-          when TEXT_NODE, CDATA_NODE
-            value_buffer << node.value if collecting_value
-          when END_ELEMENT_NODE
-            case node.local_name
-            when "v"
-              raw_value = value_buffer.dup
-              collecting_value = false
-            when "t"
-              raw_value = raw_value ? raw_value << value_buffer : value_buffer.dup
-              collecting_value = false
-            when "c"
-              current_cells << build_row_entry(cell_ref, coerce_value(raw_value, cell_type), values_only)
-              cell_ref = nil
-              cell_type = nil
-              raw_value = nil
-            when "row"
-              current_cells = pad_row(current_cells, current_row_index, values_only: values_only) if pad_cells
-              current_cells = expand_merged_cells(current_cells, current_row_index, values_only: values_only) if expand_merged
-              yield values_only ? extract_values(current_cells).freeze : Row.new(index: current_row_index, cells: current_cells)
-              last_row_index = current_row_index
-              current_row_index = nil
-              current_cells = nil
-            end
-          end
-        end
+      if values_only && !pad_cells && !expand_merged
+        each_row_values_only(&block)
+      else
+        each_row_full(pad_cells: pad_cells, values_only: values_only, expand_merged: expand_merged, &block)
       end
     end
 
@@ -114,6 +59,142 @@ module Rbxl
     end
 
     private
+
+    def each_row_values_only(&block)
+      if defined?(Rbxl::Native) && !@disable_native
+        xml = @zip.get_entry(@entry_path).get_input_stream.read
+        Rbxl::Native.parse_sheet(xml, @shared_strings, &block)
+        return
+      end
+
+      cell_type = nil
+      collecting_value = false
+      in_v = false
+      raw_value = nil
+      value_buffer = +""
+      current_values = nil
+      row_depth = nil
+
+      with_sheet_reader do |reader|
+        reader.each do |node|
+          case node.node_type
+          when ELEMENT_NODE
+            case node.local_name
+            when "row"
+              current_values = []
+              row_depth = node.depth
+            when "c"
+              cell_type = node.attribute("t")
+              raw_value = nil
+            when "v"
+              collecting_value = true
+              in_v = true
+              value_buffer.clear
+            when "t"
+              collecting_value = true
+              value_buffer.clear
+            end
+          when TEXT_NODE, CDATA_NODE
+            value_buffer << node.value if collecting_value
+          when END_ELEMENT_NODE
+            if collecting_value
+              if in_v
+                raw_value = value_buffer.dup
+                collecting_value = false
+                in_v = false
+              else
+                raw_value = raw_value ? raw_value << value_buffer : value_buffer.dup
+                collecting_value = false
+              end
+            elsif node.depth == row_depth
+              yield current_values.freeze
+              current_values = nil
+            elsif current_values && node.depth == row_depth + 1
+              current_values << coerce_value(raw_value, cell_type)
+              cell_type = nil
+              raw_value = nil
+            end
+          end
+        end
+      end
+    end
+
+    def each_row_full(pad_cells:, values_only:, expand_merged:, &block)
+      if defined?(Rbxl::Native) && !@disable_native && !pad_cells && !expand_merged && !values_only
+        xml = @zip.get_entry(@entry_path).get_input_stream.read
+        Rbxl::Native.parse_sheet_full(xml, @shared_strings, &block)
+        return
+      end
+
+      current_row_index = nil
+      last_row_index = 0
+      current_cells = nil
+      cell_ref = nil
+      cell_type = nil
+      current_col_index = 0
+      collecting_value = false
+      in_v = false
+      raw_value = nil
+      value_buffer = +""
+      row_depth = nil
+
+      with_sheet_reader do |reader|
+        reader.each do |node|
+          case node.node_type
+          when ELEMENT_NODE
+            case node.local_name
+            when "row"
+              current_row_index = attribute_int(node, "r") || (last_row_index + 1)
+              current_col_index = 0
+              current_cells = []
+              row_depth = node.depth
+            when "c"
+              cell_ref = node.attribute("r")
+              if cell_ref
+                current_col_index = split_col_index(cell_ref)
+              else
+                current_col_index += 1
+                cell_ref = "#{column_name(current_col_index)}#{current_row_index}"
+              end
+              cell_type = node.attribute("t")
+              raw_value = nil
+            when "v"
+              collecting_value = true
+              in_v = true
+              value_buffer.clear
+            when "t"
+              collecting_value = true
+              value_buffer.clear
+            end
+          when TEXT_NODE, CDATA_NODE
+            value_buffer << node.value if collecting_value
+          when END_ELEMENT_NODE
+            if collecting_value
+              if in_v
+                raw_value = value_buffer.dup
+                collecting_value = false
+                in_v = false
+              else
+                raw_value = raw_value ? raw_value << value_buffer : value_buffer.dup
+                collecting_value = false
+              end
+            elsif node.depth == row_depth
+              current_cells = pad_row(current_cells, current_row_index, values_only: values_only) if pad_cells
+              current_cells = expand_merged_cells(current_cells, current_row_index, values_only: values_only) if expand_merged
+              yield values_only ? extract_values(current_cells).freeze : Row.new(index: current_row_index, cells: current_cells)
+              last_row_index = current_row_index
+              current_row_index = nil
+              current_cells = nil
+            elsif current_cells && node.depth == row_depth + 1
+              current_cells << build_row_entry(cell_ref, coerce_value(raw_value, cell_type), values_only)
+              cell_ref = nil
+              cell_type = nil
+              raw_value = nil
+            end
+          end
+        end
+      end
+    end
 
     def with_sheet_reader
       io = @zip.get_entry(@entry_path).get_input_stream
@@ -208,14 +289,57 @@ module Rbxl
     end
 
     def split_coordinate(reference)
-      match = reference.match(/\A([A-Z]+)(\d+)\z/)
-      return [nil, nil] unless match
+      col = 0
+      i = 0
+      len = reference.length
 
-      [column_index(match[1]), match[2].to_i]
+      while i < len
+        byte = reference.getbyte(i)
+        break unless byte >= 65 && byte <= 90 # A-Z
+
+        col = (col * 26) + (byte - 64)
+        i += 1
+      end
+
+      return [nil, nil] if i == 0 || i == len
+
+      row = 0
+      while i < len
+        byte = reference.getbyte(i)
+        return [nil, nil] unless byte >= 48 && byte <= 57 # 0-9
+
+        row = (row * 10) + (byte - 48)
+        i += 1
+      end
+
+      [col, row]
     end
 
     def column_index(label)
-      label.each_char.reduce(0) { |sum, char| (sum * 26) + (char.ord - 64) }
+      col = 0
+      i = 0
+      len = label.length
+      while i < len
+        col = (col * 26) + (label.getbyte(i) - 64)
+        i += 1
+      end
+      col
+    end
+
+    def split_col_index(reference)
+      col = 0
+      i = 0
+      len = reference.length
+
+      while i < len
+        byte = reference.getbyte(i)
+        break unless byte >= 65 && byte <= 90
+
+        col = (col * 26) + (byte - 64)
+        i += 1
+      end
+
+      col
     end
 
     def pad_row(cells, row_index, values_only:)
@@ -276,11 +400,11 @@ module Rbxl
     end
 
     def set_value_at(cells, row_index, col_index, value, values_only:)
-      coordinate = "#{column_name(col_index)}#{row_index}"
-
       if values_only
+        coordinate = "#{column_name(col_index)}#{row_index}"
         cells[col_index - 1] = [coordinate, value]
       else
+        coordinate = "#{column_name(col_index)}#{row_index}"
         cells[col_index - 1] = ReadOnlyCell.new(coordinate, value)
       end
 
@@ -306,10 +430,44 @@ module Rbxl
 
     def infer_scalar(raw_value)
       return nil if raw_value.nil? || raw_value.empty?
-      return raw_value.to_i if raw_value.match?(/\A-?\d+\z/)
-      return raw_value.to_f if raw_value.match?(/\A-?(?:\d+\.\d+|\d+\.|\.\d+)\z/)
+
+      numeric_kind = detect_numeric_kind(raw_value)
+      return raw_value.to_i if numeric_kind == :integer
+      return raw_value.to_f if numeric_kind == :float
 
       raw_value
+    end
+
+    def detect_numeric_kind(value)
+      index = 0
+      length = value.length
+      saw_digit = false
+      saw_dot = false
+
+      if value.getbyte(0) == 45
+        index = 1
+        return nil if length == 1
+      end
+
+      while index < length
+        byte = value.getbyte(index)
+
+        if byte >= 48 && byte <= 57
+          saw_digit = true
+        elsif byte == 46
+          return nil if saw_dot
+
+          saw_dot = true
+        else
+          return nil
+        end
+
+        index += 1
+      end
+
+      return nil unless saw_digit
+
+      saw_dot ? :float : :integer
     end
 
     def column_name(index)

@@ -8,6 +8,7 @@ Current scope is intentionally small:
 - `read_only` row streaming
 - `close()` for read-only workbooks
 - minimal `openpyxl`-like API
+- optional C extension (`rbxl/native`) for maximum performance
 
 Out of scope for this MVP:
 
@@ -46,38 +47,92 @@ book.close
 `write_only` workbooks are save-once by design. This matches the optimized
 mode tradeoff: low flexibility in exchange for simpler memory behavior.
 
+## Native C Extension
+
+Add a single `require` to opt-in to the libxml2-based C extension for
+significantly faster read and write performance:
+
+```ruby
+require "rbxl"
+require "rbxl/native"  # opt-in
+
+# Same API, backed by C extension
+book = Rbxl.open("large.xlsx", read_only: true)
+book.sheet("Data").rows(values_only: true).each { |row| process(row) }
+book.close
+```
+
+The C extension is **opt-in by design**:
+
+- **Portability first**: `require "rbxl"` alone works everywhere Ruby and
+  Nokogiri run, with zero native compilation required. This is the default.
+- **Performance when you need it**: `require "rbxl/native"` activates the
+  libxml2 SAX2 backend for read/write hot paths. If the `.so` was not built
+  (e.g. libxml2 headers missing at install time), you get a clear `LoadError`
+  rather than a silent degradation.
+- **Same API, same output**: switching between the two paths changes nothing
+  about behavior or output format. The test suite runs both paths and
+  compares results cell-by-cell to guarantee parity.
+- **Fallback is automatic at build time**: `gem install rbxl` attempts to
+  compile the C extension. If libxml2 is not found, compilation is silently
+  skipped and the gem installs successfully without it. You only notice when
+  you try `require "rbxl/native"`.
+
+Requirements for the C extension:
+
+- libxml2 development headers (`libxml2-dev` / `libxml2-devel`), or
+- Nokogiri with bundled libxml2 (headers are detected automatically)
+
 ## Design Notes
 
 - Writer avoids a full workbook object graph and streams rows into sheet XML.
 - Reader uses a pull parser for worksheet XML so it can iterate rows without building the full DOM.
 - Strings written by the MVP use `inlineStr` to avoid shared string bookkeeping during generation.
 - Reader supports both shared strings and inline strings.
+- The native extension uses libxml2 SAX2 directly, bypassing Nokogiri's per-node Ruby object allocation overhead.
 
 ## Development
 
 ```bash
 bundle install
-RBENV_VERSION=3.4.5 ruby -Ilib test/rbxl_test.rb
-RBENV_VERSION=3.4.5 ruby benchmark/write_read.rb
-RBENV_VERSION=3.4.5 ruby benchmark/compare.rb
+
+# Run tests (pure Ruby)
+ruby -Ilib -Itest test/rbxl_test.rb
+
+# Run tests (with native extension)
+cd ext/rbxl_native && ruby extconf.rb && make && cd ../..
+ruby -Ilib -Itest -r rbxl/native test/rbxl_test.rb
+ruby -Ilib -Itest test/fast_ext_test.rb
+
+# Benchmarks
+ruby -Ilib benchmark/compare.rb                    # pure Ruby
+ruby -Ilib -r rbxl/native benchmark/compare.rb     # with native
 ```
 
 ## Benchmarks
 
-The included benchmark is a simple smoke benchmark for the optimized modes.
+5000 rows x 10 columns, Ruby 3.4 / Python 3.13:
 
-```bash
-RBENV_VERSION=3.4.5 RBXL_BENCH_ROWS=20000 RBXL_BENCH_COLS=12 ruby benchmark/write_read.rb
-```
+![Benchmark chart](benchmark/chart.png)
 
-It reports write time, read iteration time, output file size, and current RSS.
+### Pure Ruby (Nokogiri Reader)
 
-For a lightweight comparison against other Ruby Excel gems installed on the
-machine:
+| benchmark | real (s) |
+|---|---|
+| rbxl write | 0.09 |
+| rbxl read | 0.30 |
+| rbxl read values | 0.22 |
+| openpyxl write | 0.36 |
+| openpyxl read | 0.28 |
+| openpyxl read values | 0.26 |
 
-```bash
-RBENV_VERSION=3.4.5 RBXL_BENCH_ROWS=5000 RBXL_BENCH_COLS=10 ruby benchmark/compare.rb
-```
+### With `rbxl/native`
+
+| benchmark | real (s) | vs openpyxl |
+|---|---|---|
+| rbxl write | **0.04** | 9x faster |
+| rbxl read | **0.08** | 3.5x faster |
+| rbxl read values | **0.03** | 9x faster |
 
 The comparison script uses these libraries when available:
 
@@ -86,29 +141,3 @@ The comparison script uses these libraries when available:
 - `roo` for read streaming
 - `rubyXL` for full workbook read
 - `openpyxl` as a Python reference point when `openpyxl` or `uv` is available
-
-The `openpyxl` numbers are reference-only. They are useful for directionally
-comparing optimized mode behavior, but they are not a pure language-neutral
-benchmark.
-
-Current reference result on this machine with `RBXL_BENCH_ROWS=5000` and
-`RBXL_BENCH_COLS=10`:
-
-```text
-benchmark                 real_s  rss_delta_kb    file_bytes
-rbxl write                0.1302         12500        193193
-rbxl read                 0.4266           912             -
-rbxl read values          0.3950          1472             -
-caxlsx write              0.4841          4224        198420
-roo read                  1.0783         17556             -
-rubyXL read               2.0921        129180             -
-openpyxl write            0.4315             0        194414
-openpyxl read             0.2837             0             -
-openpyxl read values      0.2553             0             -
-```
-
-Interpretation:
-
-- `rbxl` write is currently faster than `caxlsx` and `openpyxl` in this benchmark.
-- `rbxl` read is still slower than `openpyxl`, but faster than `roo` and `rubyXL`.
-- `rbxl` read with `values_only` remains materially closer to `openpyxl` than the other Ruby readers here.

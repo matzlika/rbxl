@@ -90,6 +90,17 @@ def read_with_roo(path)
   count
 end
 
+def write_with_rubyxl(path, header, body)
+  workbook = RubyXL::Workbook.new
+  worksheet = workbook[0]
+  worksheet.sheet_name = "Bench"
+  header.each_with_index { |val, col| worksheet.add_cell(0, col, val) }
+  body.each_with_index do |row, row_idx|
+    row.each_with_index { |val, col| worksheet.add_cell(row_idx + 1, col, val) }
+  end
+  workbook.write(path)
+end
+
 def read_with_rubyxl(path)
   workbook = RubyXL::Parser.parse(path)
   worksheet = workbook["Bench"]
@@ -155,6 +166,8 @@ Dir.mktmpdir("rbxl-compare-") do |dir|
   end
 
   if load_optional("rubyXL")
+    rubyxl_path = File.join(dir, "rubyxl.xlsx")
+    results << benchmark("rubyXL write") { write_with_rubyxl(rubyxl_path, header, body) }.merge(size: File.size(rubyxl_path))
     results << benchmark("rubyXL read") { read_with_rubyxl(rbxl_path) }
   end
 

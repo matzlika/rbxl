@@ -92,7 +92,7 @@ module Rbxl
           when "rPh"
             in_phonetic = false
           when "si"
-            strings << current_fragments.join
+            strings << current_fragments.join.freeze
             in_si = false
             in_run = false
             in_phonetic = false
@@ -107,26 +107,47 @@ module Rbxl
     end
 
     def load_sheet_entries
-      workbook_xml = REXML::Document.new(read_entry("xl/workbook.xml"))
-      rels_xml = REXML::Document.new(read_entry("xl/_rels/workbook.xml.rels"))
-
-      relationships = {}
-      REXML::XPath.each(rels_xml, "//rel:Relationship", { "rel" => PACKAGE_REL_NS }) do |rel|
-        relationships[rel.attributes["Id"]] = rel.attributes["Target"]
-      end
-
+      relationships = load_relationship_targets("xl/_rels/workbook.xml.rels")
       sheets = {}
-      REXML::XPath.each(workbook_xml, "//main:sheets/main:sheet", { "main" => MAIN_NS }) do |sheet|
-        name = sheet.attributes["name"]
-        rid = sheet.attributes["r:id"]
+
+      each_xml_node("xl/workbook.xml") do |node|
+        next unless node.node_type == Nokogiri::XML::Reader::TYPE_ELEMENT
+        next unless node.local_name == "sheet"
+
+        name = node.attribute("name")
+        rid = node.attribute("r:id")
+        next unless name && rid
+
         target = relationships.fetch(rid)
         sheets[name] = "xl/#{target}".gsub(%r{/+}, "/")
       end
+
       sheets
     end
 
-    def read_entry(name)
-      @zip.get_entry(name).get_input_stream.read
+    def load_relationship_targets(entry_path)
+      relationships = {}
+
+      each_xml_node(entry_path) do |node|
+        next unless node.node_type == Nokogiri::XML::Reader::TYPE_ELEMENT
+        next unless node.local_name == "Relationship"
+
+        id = node.attribute("Id")
+        target = node.attribute("Target")
+        next unless id && target
+
+        relationships[id] = target
+      end
+
+      relationships
+    end
+
+    def each_xml_node(entry_path)
+      io = @zip.get_entry(entry_path).get_input_stream
+      reader = Nokogiri::XML::Reader(io)
+      reader.each { |node| yield node }
+    ensure
+      io&.close
     end
   end
 end

@@ -5,6 +5,7 @@ module Rbxl
     def initialize(name:)
       @name = name
       @rows = []
+      @column_name_cache = []
     end
 
     def <<(values)
@@ -21,90 +22,158 @@ module Rbxl
     end
 
     def to_xml
+      if defined?(Rbxl::Native)
+        return Rbxl::Native.generate_sheet(@rows)
+      end
+
       dimension_ref = @rows.empty? ? "A1" : "A1:#{column_name(max_columns)}#{@rows.length}"
-      row_nodes = @rows.each_with_index.map do |row_values, row_index|
-        cells = row_values.each_with_index.map do |value, col_index|
-          reference = "#{column_name(col_index + 1)}#{row_index + 1}"
-          serialize_cell(reference, value)
-        end.join
+      buf = +""
+      buf << '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      buf << "\n"
+      buf << '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      buf << "\n"
+      buf << '  <dimension ref="'
+      buf << dimension_ref
+      buf << '"/>'
+      buf << "\n"
+      buf << '  <sheetData>'
 
-        %(<row r="#{row_index + 1}">#{cells}</row>)
-      end.join
+      @rows.each_with_index do |row_values, row_index|
+        row_num_str = (row_index + 1).to_s
+        buf << '<row r="'
+        buf << row_num_str
+        buf << '">'
+        row_values.each_with_index do |value, col_index|
+          serialize_cell_to(buf, column_name(col_index + 1), row_num_str, value)
+        end
+        buf << '</row>'
+      end
 
-      <<~XML.chomp
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <dimension ref="#{dimension_ref}"/>
-          <sheetData>#{row_nodes}</sheetData>
-        </worksheet>
-      XML
+      buf << "</sheetData>\n</worksheet>"
+      buf
     end
 
     private
 
-    def serialize_cell(reference, value)
+    def serialize_cell_to(buf, col_name, row_num_str, value)
       if value.is_a?(WriteOnlyCell)
-        return serialize_write_only_cell(reference, value)
+        serialize_write_only_cell_to(buf, col_name, row_num_str, value)
+        return
       end
 
+      buf << '<c r="'
+      buf << col_name
+      buf << row_num_str
       case value
       when nil
-        %(<c r="#{reference}"/>)
+        buf << '"/>'
       when true
-        %(<c r="#{reference}" t="b"><v>1</v></c>)
+        buf << '" t="b"><v>1</v></c>'
       when false
-        %(<c r="#{reference}" t="b"><v>0</v></c>)
+        buf << '" t="b"><v>0</v></c>'
+      when Integer
+        buf << '"><v>'
+        buf << value.to_s
+        buf << '</v></c>'
       when Numeric
-        %(<c r="#{reference}"><v>#{value}</v></c>)
+        buf << '"><v>'
+        buf << value.to_s
+        buf << '</v></c>'
       when Date, DateTime, Time
-        %(<c r="#{reference}" t="inlineStr"><is><t>#{escape(value.iso8601)}</t></is></c>)
+        buf << '" t="inlineStr"><is><t>'
+        escape_to(buf, value.iso8601)
+        buf << '</t></is></c>'
       else
-        %(<c r="#{reference}" t="inlineStr"><is><t>#{escape(value)}</t></is></c>)
+        buf << '" t="inlineStr"><is><t>'
+        escape_to(buf, value.to_s)
+        buf << '</t></is></c>'
       end
     end
 
-    def escape(value)
-      CGI.escapeHTML(value.to_s)
+    def escape_to(buf, str)
+      i = 0
+      len = str.bytesize
+      start = 0
+
+      while i < len
+        byte = str.getbyte(i)
+        case byte
+        when 38 # &
+          buf << str.byteslice(start, i - start) if i > start
+          buf << '&amp;'
+          start = i + 1
+        when 60 # <
+          buf << str.byteslice(start, i - start) if i > start
+          buf << '&lt;'
+          start = i + 1
+        when 62 # >
+          buf << str.byteslice(start, i - start) if i > start
+          buf << '&gt;'
+          start = i + 1
+        when 34 # "
+          buf << str.byteslice(start, i - start) if i > start
+          buf << '&quot;'
+          start = i + 1
+        end
+        i += 1
+      end
+
+      if start == 0
+        buf << str
+      elsif start < len
+        buf << str.byteslice(start, len - start)
+      end
     end
 
     def column_name(index)
-      name = +""
-      current = index
-
-      while current.positive?
-        current -= 1
-        name.prepend((65 + (current % 26)).chr)
-        current /= 26
+      @column_name_cache[index] ||= begin
+        name = +""
+        current = index
+        while current.positive?
+          current -= 1
+          name.prepend((65 + (current % 26)).chr)
+          current /= 26
+        end
+        name.freeze
       end
-
-      name
     end
 
     def max_columns
-      @rows.map(&:length).max || 1
+      max = 0
+      @rows.each { |r| max = r.length if r.length > max }
+      max > 0 ? max : 1
     end
 
-    def serialize_write_only_cell(reference, cell)
-      style_attr = cell.style_id ? %( s="#{cell.style_id}") : ""
-      serialized = serialize_scalar_value(cell.value)
+    def serialize_write_only_cell_to(buf, col_name, row_num_str, cell)
+      buf << '<c r="'
+      buf << col_name
+      buf << row_num_str
+      buf << '"'
+      if cell.style_id
+        buf << ' s="'
+        buf << cell.style_id.to_s
+        buf << '"'
+      end
 
-      %(<c r="#{reference}"#{style_attr}#{serialized}>)
-    end
-
-    def serialize_scalar_value(value)
-      case value
+      case cell.value
       when nil
-        ""
+        buf << '/>'
       when true
-        %( t="b"><v>1</v></c>)
+        buf << ' t="b"><v>1</v></c>'
       when false
-        %( t="b"><v>0</v></c>)
+        buf << ' t="b"><v>0</v></c>'
       when Numeric
-        %(<v>#{value}</v></c>)
+        buf << '><v>'
+        buf << cell.value.to_s
+        buf << '</v></c>'
       when Date, DateTime, Time
-        %( t="inlineStr"><is><t>#{escape(value.iso8601)}</t></is></c>)
+        buf << ' t="inlineStr"><is><t>'
+        escape_to(buf, cell.value.iso8601)
+        buf << '</t></is></c>'
       else
-        %( t="inlineStr"><is><t>#{escape(value)}</t></is></c>)
+        buf << ' t="inlineStr"><is><t>'
+        escape_to(buf, cell.value.to_s)
+        buf << '</t></is></c>'
       end
     end
   end

@@ -10,8 +10,9 @@ Gem::Specification.new do |spec|
   spec.license = "MIT"
   spec.required_ruby_version = ">= 3.1"
 
-  spec.files = Dir["lib/**/*.rb"] + %w[README.md]
+  spec.files = Dir["lib/**/*.rb"] + Dir["ext/**/*.{rb,c,h}"] + %w[README.md]
   spec.require_paths = ["lib"]
+  spec.extensions = ["ext/rbxl_native/extconf.rb"]
 
   spec.add_dependency "rubyzip", "~> 2.3"
   spec.add_dependency "nokogiri", ">= 1.19", "< 2.0"
