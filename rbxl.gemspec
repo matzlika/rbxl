@@ -17,7 +17,7 @@ Gem::Specification.new do |spec|
     "changelog_uri" => "https://github.com/matzlika/rbxl/releases"
   }
 
-  spec.files = Dir["lib/**/*.rb"] + Dir["ext/**/*.{rb,c,h}"] + %w[LICENSE.txt README.md Rakefile]
+  spec.files = Dir["lib/**/*.rb"] + Dir["ext/**/*.{rb,c,h}"] + %w[CHANGELOG.md LICENSE.txt README.md Rakefile]
   spec.require_paths = ["lib"]
   spec.extensions = ["ext/rbxl_native/extconf.rb"]
 
