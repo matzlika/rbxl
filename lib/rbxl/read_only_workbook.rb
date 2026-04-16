@@ -53,11 +53,11 @@ module Rbxl
       xml = REXML::Document.new(entry.get_input_stream.read)
       strings = []
       REXML::XPath.each(xml, "//main:si", { "main" => MAIN_NS }) do |node|
-        text = +""
-        node.each_recursive do |child|
-          text << child.text.to_s if child.is_a?(REXML::Text)
+        fragments = []
+        REXML::XPath.each(node, ".//main:t", { "main" => MAIN_NS }) do |text_node|
+          fragments << text_node.text.to_s
         end
-        strings << text
+        strings << fragments.join
       end
       strings
     end

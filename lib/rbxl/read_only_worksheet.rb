@@ -19,9 +19,11 @@ module Rbxl
       return enum_for(:each_row, pad_cells: pad_cells, values_only: values_only) unless block_given?
 
       current_row_index = nil
+      last_row_index = 0
       current_cells = nil
       cell_ref = nil
       cell_type = nil
+      current_col_index = 0
       collecting_value = false
       raw_value = nil
       value_buffer = +""
@@ -32,10 +34,18 @@ module Rbxl
           when ELEMENT_NODE
             case node.local_name
             when "row"
-              current_row_index = attribute_int(node, "r")
+              current_row_index = attribute_int(node, "r") || (last_row_index + 1)
+              current_col_index = 0
               current_cells = []
             when "c"
               cell_ref = node.attribute("r")
+              if cell_ref
+                col_index, = split_coordinate(cell_ref)
+                current_col_index = col_index || current_col_index
+              else
+                current_col_index += 1
+                cell_ref = "#{column_name(current_col_index)}#{current_row_index}"
+              end
               cell_type = node.attribute("t")
               raw_value = nil
             when "v", "t"
@@ -59,7 +69,8 @@ module Rbxl
               raw_value = nil
             when "row"
               current_cells = pad_row(current_cells, current_row_index, values_only: values_only) if pad_cells
-              yield values_only ? current_cells.freeze : Row.new(index: current_row_index, cells: current_cells)
+              yield values_only ? extract_values(current_cells).freeze : Row.new(index: current_row_index, cells: current_cells)
+              last_row_index = current_row_index
               current_row_index = nil
               current_cells = nil
             end
@@ -173,14 +184,19 @@ module Rbxl
       return cells unless dimensions && dimensions[:max_col]
 
       by_column = cells.each_with_object({}) do |cell, acc|
-        coordinate = cell.respond_to?(:coordinate) ? cell.coordinate : nil
+        coordinate =
+          if cell.respond_to?(:coordinate)
+            cell.coordinate
+          elsif values_only
+            cell[0]
+          end
         next unless coordinate
 
         acc[column_index(coordinate[/\A[A-Z]+/])] = cell
       end
 
       (1..dimensions[:max_col]).map do |col|
-        by_column[col] || (values_only ? nil : EmptyCell.new(coordinate: "#{column_name(col)}#{row_index}"))
+        by_column[col] || (values_only ? [nil, nil] : EmptyCell.new(coordinate: "#{column_name(col)}#{row_index}"))
       end
     end
 
@@ -224,9 +240,13 @@ module Rbxl
     end
 
     def build_row_entry(coordinate, value, values_only)
-      return value if values_only
+      return [coordinate, value] if values_only
 
       ReadOnlyCell.new(coordinate, value)
+    end
+
+    def extract_values(cells)
+      cells.map { |cell| cell.is_a?(Array) ? cell[1] : cell }
     end
   end
 end

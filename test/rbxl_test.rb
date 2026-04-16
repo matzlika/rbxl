@@ -1,4 +1,5 @@
 require "minitest/autorun"
+require "pathname"
 require "tmpdir"
 require_relative "../lib/rbxl"
 
@@ -54,6 +55,20 @@ class RbxlTest < Minitest::Test
 
       loaded = Rbxl.open(path, read_only: true)
       assert_raises(Rbxl::SheetNotFoundError) { loaded.sheet("Nope") }
+      loaded.close
+    end
+  end
+
+  def test_open_accepts_pathname
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "book.xlsx")
+
+      book = Rbxl.new(write_only: true)
+      book.add_sheet("Only").append([1])
+      book.save(path)
+
+      loaded = Rbxl.open(Pathname.new(path), read_only: true)
+      assert_equal ["Only"], loaded.sheet_names
       loaded.close
     end
   end
@@ -120,6 +135,20 @@ class RbxlTest < Minitest::Test
     end
   end
 
+  def test_writer_round_trips_escaped_strings
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "escaped.xlsx")
+
+      book = Rbxl.new(write_only: true)
+      book.add_sheet("Escaped").append(["&", "<", ">", "", "\"quoted\""])
+      book.save(path)
+
+      loaded = Rbxl.open(path, read_only: true)
+      assert_equal [["&", "<", ">", "", "\"quoted\""]], loaded.sheet("Escaped").rows(values_only: true).to_a
+      loaded.close
+    end
+  end
+
   def test_append_accepts_enumerator_rows
     Dir.mktmpdir do |dir|
       path = File.join(dir, "enum.xlsx")
@@ -151,87 +180,109 @@ class RbxlTest < Minitest::Test
     end
   end
 
+  def test_values_only_with_pad_cells_returns_nil_for_missing_cells
+    loaded = Rbxl.open(fixture_path("sparse.xlsx"), read_only: true)
+    row = loaded.sheet("Sparse").each_row(pad_cells: true, values_only: true).first
+
+    assert_equal ["left", nil, "right"], row
+    loaded.close
+  end
+
   def test_reader_supports_padded_cells_for_missing_coordinates
+    loaded = Rbxl.open(fixture_path("sparse.xlsx"), read_only: true)
+    row = loaded.sheet("Sparse").each_row(pad_cells: true).first
+
+    assert_equal ["left", nil, "right"], row.values
+    assert_instance_of Rbxl::EmptyCell, row[1]
+    assert_equal "B1", row[1].coordinate
+    loaded.close
+  end
+
+  def test_close_is_idempotent
     Dir.mktmpdir do |dir|
-      path = File.join(dir, "sparse_manual.xlsx")
-      build_sparse_xlsx(path)
+      path = File.join(dir, "report.xlsx")
+
+      book = Rbxl.new(write_only: true)
+      book.add_sheet("Report").append([1])
+      book.save(path)
 
       loaded = Rbxl.open(path, read_only: true)
-      row = loaded.sheet("Sparse").each_row(pad_cells: true).first
+      loaded.close
+      loaded.close
 
-      assert_equal ["left", nil, "right"], row.values
-      assert_instance_of Rbxl::EmptyCell, row[1]
-      assert_equal "B1", row[1].coordinate
+      assert loaded.closed?
+    end
+  end
+
+  def test_multiple_sheets_preserve_order_and_can_be_read_individually
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "multi.xlsx")
+
+      book = Rbxl.new(write_only: true)
+      book.add_sheet("First").append(["a"])
+      book.add_sheet("Second").append(["b"])
+      book.add_sheet("Third").append(["c"])
+      book.save(path)
+
+      loaded = Rbxl.open(path, read_only: true)
+
+      assert_equal ["First", "Second", "Third"], loaded.sheet_names
+      assert_equal [["a"]], loaded.sheet("First").rows(values_only: true).to_a
+      assert_equal [["b"]], loaded.sheet("Second").rows(values_only: true).to_a
+      assert_equal [["c"]], loaded.sheet("Third").rows(values_only: true).to_a
       loaded.close
     end
   end
 
-  private
+  def test_shared_strings_can_read_empty_string
+    loaded = Rbxl.open(fixture_path("shared_strings.xlsx"), read_only: true)
+    rows = loaded.sheet("Strings").rows(values_only: true).to_a
 
-  def build_sparse_xlsx(path)
-    Zip::OutputStream.open(path) do |zip|
-      write_entry(zip, "[Content_Types].xml", <<~XML.chomp)
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
-          <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
-          <Default Extension="xml" ContentType="application/xml"/>
-          <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
-          <Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>
-          <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
-        </Types>
-      XML
-
-      write_entry(zip, "_rels/.rels", <<~XML.chomp)
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
-        </Relationships>
-      XML
-
-      write_entry(zip, "xl/workbook.xml", <<~XML.chomp)
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
-          <sheets><sheet name="Sparse" sheetId="1" r:id="rId1"/></sheets>
-        </workbook>
-      XML
-
-      write_entry(zip, "xl/_rels/workbook.xml.rels", <<~XML.chomp)
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
-          <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
-          <Relationship Id="rId2" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
-        </Relationships>
-      XML
-
-      write_entry(zip, "xl/styles.xml", <<~XML.chomp)
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <fonts count="1"><font><sz val="11"/><name val="Calibri"/></font></fonts>
-          <fills count="1"><fill><patternFill patternType="none"/></fill></fills>
-          <borders count="1"><border><left/><right/><top/><bottom/><diagonal/></border></borders>
-          <cellStyleXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0"/></cellStyleXfs>
-          <cellXfs count="1"><xf numFmtId="0" fontId="0" fillId="0" borderId="0" xfId="0"/></cellXfs>
-          <cellStyles count="1"><cellStyle name="Normal" xfId="0" builtinId="0"/></cellStyles>
-        </styleSheet>
-      XML
-
-      write_entry(zip, "xl/worksheets/sheet1.xml", <<~XML.chomp)
-        <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-        <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">
-          <dimension ref="A1:C1"/>
-          <sheetData>
-            <row r="1">
-              <c r="A1" t="inlineStr"><is><t>left</t></is></c>
-              <c r="C1" t="inlineStr"><is><t>right</t></is></c>
-            </row>
-          </sheetData>
-        </worksheet>
-      XML
-    end
+    assert_equal [["alpha"], [""]], rows
+    loaded.close
   end
 
-  def write_entry(zip, name, content)
-    zip.put_next_entry(name)
-    zip.write(content)
+  def test_calculate_dimension_force_handles_sheet_without_dimension_node
+    loaded = Rbxl.open(fixture_path("no_dimension.xlsx"), read_only: true)
+    sheet = loaded.sheet("NoDimension")
+
+    assert_nil sheet.max_column
+    assert_nil sheet.max_row
+    assert_raises(Rbxl::UnsizedWorksheetError) { sheet.calculate_dimension }
+    assert_equal "A1:C2", sheet.calculate_dimension(force: true)
+    loaded.close
+  end
+
+  def test_reader_supports_padded_sparse_rows_over_multiple_rows
+    loaded = Rbxl.open(fixture_path("sparse_rows.xlsx"), read_only: true)
+    rows = loaded.sheet("SparseRows").rows(values_only: true).to_a
+    padded = loaded.sheet("SparseRows").each_row(pad_cells: true, values_only: true).to_a
+
+    assert_equal [["top"], ["tail"]], rows
+    assert_equal [["top", nil, nil], [nil, nil, "tail"]], padded
+    loaded.close
+  end
+
+  def test_reader_supports_implicit_coordinates
+    loaded = Rbxl.open(fixture_path("implicit_coordinates.xlsx"), read_only: true)
+    rows = loaded.sheet("Implicit").rows(values_only: true).to_a
+
+    assert_equal [["Test"], ["A2", "B2", "C2"]], rows
+    assert_equal "A1:C2", loaded.sheet("Implicit").calculate_dimension
+    loaded.close
+  end
+
+  def test_open_tolerates_unrelated_broken_relationship_entries
+    loaded = Rbxl.open(fixture_path("file_item_error.xlsx"), read_only: true)
+
+    assert_equal ["BrokenRels"], loaded.sheet_names
+    assert_equal [["ok"]], loaded.sheet("BrokenRels").rows(values_only: true).to_a
+    loaded.close
+  end
+
+  private
+
+  def fixture_path(name)
+    File.join(__dir__, "fixtures", name)
   end
 end
