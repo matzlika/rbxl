@@ -70,6 +70,20 @@ book.sheet("Data").rows(values_only: true).each { |row| process(row) }
 book.close
 ```
 
+For large worksheets where peak memory matters more than squeezing out the
+last few percent of throughput, opt into chunk-fed worksheet inflation:
+
+```ruby
+require "rbxl"
+require "rbxl/native"
+
+Rbxl.max_worksheet_bytes = 64 * 1024 * 1024
+
+book = Rbxl.open("large.xlsx", read_only: true, streaming: true)
+book.sheet("Data").rows(values_only: true).each { |row| process(row) }
+book.close
+```
+
 The C extension is **opt-in by design**:
 
 - **Portability first**: `require "rbxl"` alone works everywhere Ruby and
@@ -93,7 +107,9 @@ The C extension is **opt-in by design**:
   input stream, so peak memory stays roughly independent of sheet size.
   Pair with `Rbxl.max_worksheet_bytes` to cap uncompressed worksheet
   inflation and stop high-compression zip-bomb style entries mid-inflate.
-  Throughput is usually within a few percent of the default path.
+  Throughput is usually within a few percent of the default path. Without
+  `require "rbxl/native"`, the flag is accepted but the pure-Ruby reader
+  still takes the buffered path.
 
 Requirements for the C extension:
 
@@ -154,23 +170,27 @@ best read as:
 | benchmark | real (s) |
 |---|---|
 | rbxl write | 0.08 |
-| rbxl read | 0.33 |
-| rbxl read values | 0.23 |
+| rbxl read | 0.29 |
+| rbxl read values | 0.22 |
+| fast_excel write | 0.18 |
+| fast_excel write constant | 0.12 |
 | exceljs write | 0.08 |
-| exceljs read | 0.17 |
+| exceljs read | 0.19 |
 | sheetjs write | 0.13 |
-| sheetjs read | 0.19 |
-| openpyxl write | 0.35 |
-| openpyxl read | 0.22 |
+| sheetjs read | 0.20 |
+| openpyxl write | 0.36 |
+| openpyxl read | 0.21 |
 | openpyxl read values | 0.18 |
+| excelize write | 0.15 |
+| excelize read | 0.14 |
 
 ### Performance Mode (`require "rbxl/native"`)
 
 | benchmark | real (s) | vs exceljs/openpyxl |
 |---|---|---|
-| rbxl write | **0.04** | about 2x / 9x faster |
-| rbxl read | **0.07** | about 2.6x / 3.2x faster |
-| rbxl read values | **0.03** | about 6.8x faster than openpyxl values |
+| rbxl write | **0.05** | about 1.8x faster than exceljs, 2.5x faster than fast_excel constant, 7.7x faster than openpyxl |
+| rbxl read | **0.09** | about 2.3x faster than exceljs, 2.4x faster than openpyxl |
+| rbxl read values | **0.04** | about 4.8x faster than openpyxl values |
 
 The comparison script uses these libraries when available:
 
@@ -178,12 +198,14 @@ Benchmark notes:
 
 - `RBXL_BENCH_WARMUP` and `RBXL_BENCH_ITERATIONS` control warmup and repeated runs.
 - Read comparisons use the same `rbxl.xlsx` fixture for `rbxl`, `roo`, `rubyXL`, and `openpyxl`.
+- `fast_excel` adds write-only comparisons for both its default mode and `constant_memory: true`.
 - JS comparisons use the same `rbxl.xlsx` fixture for `exceljs` and `sheetjs`.
 - Write comparisons still measure each library producing its own workbook.
 - `rss_delta_kb` is best-effort process RSS on Linux and should be treated as directional.
 - Install JS benchmark dependencies with `cd benchmark && npm install`.
 
 - `rbxl` for write/read
+- `fast_excel` for write / constant-memory write
 - `exceljs` for write/read
 - `sheetjs` for write/read
 - `excelize` (Go) for write/read

@@ -11,25 +11,14 @@ GEM
     date (3.5.1)
     drb (2.2.3)
     erb (6.0.3)
+    fast_excel (0.5.0)
+      ffi (> 1.9, < 2)
+    ffi (1.17.4-x86_64-linux-gnu)
     logger (1.7.0)
     minitest (6.0.3)
       drb (~> 2.0)
       prism (~> 1.5)
-    nokogiri (1.19.2-aarch64-linux-gnu)
-      racc (~> 1.4)
-    nokogiri (1.19.2-aarch64-linux-musl)
-      racc (~> 1.4)
-    nokogiri (1.19.2-arm-linux-gnu)
-      racc (~> 1.4)
-    nokogiri (1.19.2-arm-linux-musl)
-      racc (~> 1.4)
-    nokogiri (1.19.2-arm64-darwin)
-      racc (~> 1.4)
-    nokogiri (1.19.2-x86_64-darwin)
-      racc (~> 1.4)
     nokogiri (1.19.2-x86_64-linux-gnu)
-      racc (~> 1.4)
-    nokogiri (1.19.2-x86_64-linux-musl)
       racc (~> 1.4)
     prism (1.9.0)
     psych (5.3.1)
@@ -49,16 +38,11 @@ GEM
     tsort (0.2.0)
 
 PLATFORMS
-  aarch64-linux-gnu
-  aarch64-linux-musl
-  arm-linux-gnu
-  arm-linux-musl
-  arm64-darwin
-  x86_64-darwin
+  x86_64-linux
   x86_64-linux-gnu
-  x86_64-linux-musl
 
 DEPENDENCIES
+  fast_excel
   minitest (>= 5.25, < 7)
   rake
   rbs (>= 3.8, < 4)
@@ -69,16 +53,11 @@ CHECKSUMS
   date (3.5.1) sha256=750d06384d7b9c15d562c76291407d89e368dda4d4fff957eb94962d325a0dc0
   drb (2.2.3)
   erb (6.0.3) sha256=e43685a8a0a0ea6a924871b2162e8953ef73147ce46b75b36d1f6774fd286e91
+  fast_excel (0.5.0)
+  ffi (1.17.4-x86_64-linux-gnu)
   logger (1.7.0) sha256=196edec7cc44b66cfb40f9755ce11b392f21f7967696af15d274dde7edff0203
   minitest (6.0.3)
-  nokogiri (1.19.2-aarch64-linux-gnu) sha256=c34d5c8208025587554608e98fd88ab125b29c80f9352b821964e9a5d5cfbd19
-  nokogiri (1.19.2-aarch64-linux-musl) sha256=7f6b4b0202d507326841a4f790294bf75098aef50c7173443812e3ac5cb06515
-  nokogiri (1.19.2-arm-linux-gnu) sha256=b7fa1139016f3dc850bda1260988f0d749934a939d04ef2da13bec060d7d5081
-  nokogiri (1.19.2-arm-linux-musl) sha256=61114d44f6742ff72194a1b3020967201e2eb982814778d130f6471c11f9828c
-  nokogiri (1.19.2-arm64-darwin) sha256=58d8ea2e31a967b843b70487a44c14c8ba1866daa1b9da9be9dbdf1b43dee205
-  nokogiri (1.19.2-x86_64-darwin) sha256=7d9af11fda72dfaa2961d8c4d5380ca0b51bc389dc5f8d4b859b9644f195e7a4
   nokogiri (1.19.2-x86_64-linux-gnu) sha256=fa8feca882b73e871a9845f3817a72e9734c8e974bdc4fbad6e4bc6e8076b94f
-  nokogiri (1.19.2-x86_64-linux-musl) sha256=93128448e61a9383a30baef041bf1f5817e22f297a1d400521e90294445069a8
   prism (1.9.0)
   psych (5.3.1) sha256=eb7a57cef10c9d70173ff74e739d843ac3b2c019a003de48447b2963d81b1974
   racc (1.8.1) sha256=4a7f6929691dbec8b5209a0b373bc2614882b55fc5d2e447a21aaa691303d62f

@@ -78,6 +78,15 @@ def write_with_rbxl(path, header, body)
   book.save(path)
 end
 
+def write_with_fast_excel(path, header, body, constant_memory: false)
+  File.delete(path) if File.exist?(path)
+  workbook = FastExcel.open(path, constant_memory: constant_memory)
+  worksheet = workbook.add_worksheet("Bench")
+  worksheet.append_row(header)
+  body.each { |row| worksheet.append_row(row) }
+  workbook.close
+end
+
 def read_with_rbxl(path)
   book = Rbxl.open(path, read_only: true)
   count = 0
@@ -247,6 +256,16 @@ Dir.mktmpdir("rbxl-compare-") do |dir|
   if load_optional("caxlsx")
     caxlsx_path = File.join(dir, "caxlsx.xlsx")
     results << benchmark("caxlsx write") { write_with_caxlsx(caxlsx_path, header, body) }.merge(size: File.size(caxlsx_path))
+  end
+
+  if load_optional("fast_excel")
+    fast_excel_path = File.join(dir, "fast_excel.xlsx")
+    results << benchmark("fast_excel write") { write_with_fast_excel(fast_excel_path, header, body) }.merge(size: File.size(fast_excel_path))
+
+    fast_excel_constant_path = File.join(dir, "fast_excel_constant.xlsx")
+    results << benchmark("fast_excel write constant") do
+      write_with_fast_excel(fast_excel_constant_path, header, body, constant_memory: true)
+    end.merge(size: File.size(fast_excel_constant_path))
   end
 
   if load_optional("roo")

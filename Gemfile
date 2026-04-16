@@ -1,6 +1,7 @@
 source "https://rubygems.org"
 
 gemspec
+gem "fast_excel"
 gem "minitest", ">= 5.25", "< 7"
 gem "rake"
 gem "rdoc", ">= 7.2", "< 8"
