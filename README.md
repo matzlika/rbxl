@@ -1,5 +1,7 @@
 # rbxl
 
+[![Gem Version](https://badge.fury.io/rb/rbxl.svg?icon=si%3Arubygems)](https://badge.fury.io/rb/rbxl)
+
 Fast, memory-friendly Ruby gem for row-by-row `.xlsx` reads and append-only writes.
 
 `rbxl` is built for the two workbook workflows that scale cleanly:
