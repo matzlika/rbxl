@@ -55,12 +55,18 @@ module Rbxl
     # @param streaming [Boolean] when the native extension is loaded, feed
     #   worksheet XML to the parser in chunks instead of reading the entry
     #   into memory first
-    def initialize(zip:, entry_path:, shared_strings:, name:, streaming: false)
+    # @param date_styles [Array<Boolean>, nil] +true+ at a style id when the
+    #   id's numFmt is a date/time format. When provided, numeric cells with
+    #   a matching style are returned as +Date+ or +Time+ instead of +Float+,
+    #   and the native fast path is bypassed.
+    def initialize(zip:, entry_path:, shared_strings:, name:, streaming: false, date_styles: nil)
       @zip = zip
       @entry_path = entry_path
       @shared_strings = shared_strings
       @name = name
       @streaming = streaming
+      @date_styles = date_styles
+      @disable_native = !date_styles.nil?
       @dimensions = extract_dimensions
       @merge_ranges_by_row = nil
       @merge_anchor_values = {}
@@ -164,12 +170,14 @@ module Rbxl
       end
 
       cell_type = nil
+      cell_style = nil
       collecting_value = false
       in_v = false
       raw_value = nil
       value_buffer = +""
       current_values = nil
       row_depth = nil
+      track_style = !@date_styles.nil?
 
       with_sheet_reader do |reader|
         reader.each do |node|
@@ -179,9 +187,19 @@ module Rbxl
             when "row"
               current_values = []
               row_depth = node.depth
+              if node.self_closing?
+                yield current_values.freeze
+                current_values = nil
+              end
             when "c"
               cell_type = node.attribute("t")
+              cell_style = track_style ? node.attribute("s")&.to_i : nil
               raw_value = nil
+              if current_values && node.self_closing?
+                current_values << coerce_value(raw_value, cell_type, cell_style)
+                cell_type = nil
+                cell_style = nil
+              end
             when "v"
               collecting_value = true
               in_v = true
@@ -202,12 +220,13 @@ module Rbxl
                 raw_value = raw_value ? raw_value << value_buffer : value_buffer.dup
                 collecting_value = false
               end
-            elsif node.depth == row_depth
+            elsif current_values && node.depth == row_depth
               yield current_values.freeze
               current_values = nil
             elsif current_values && node.depth == row_depth + 1
-              current_values << coerce_value(raw_value, cell_type)
+              current_values << coerce_value(raw_value, cell_type, cell_style)
               cell_type = nil
+              cell_style = nil
               raw_value = nil
             end
           end
@@ -231,12 +250,14 @@ module Rbxl
       current_cells = nil
       cell_ref = nil
       cell_type = nil
+      cell_style = nil
       current_col_index = 0
       collecting_value = false
       in_v = false
       raw_value = nil
       value_buffer = +""
       row_depth = nil
+      track_style = !@date_styles.nil?
 
       with_sheet_reader do |reader|
         reader.each do |node|
@@ -248,6 +269,14 @@ module Rbxl
               current_col_index = 0
               current_cells = []
               row_depth = node.depth
+              if node.self_closing?
+                emit_row(current_cells, current_row_index,
+                         pad_cells: pad_cells, expand_merged: expand_merged,
+                         values_only: values_only, &block)
+                last_row_index = current_row_index
+                current_row_index = nil
+                current_cells = nil
+              end
             when "c"
               cell_ref = node.attribute("r")
               if cell_ref
@@ -257,7 +286,14 @@ module Rbxl
                 cell_ref = "#{column_name(current_col_index)}#{current_row_index}"
               end
               cell_type = node.attribute("t")
+              cell_style = track_style ? node.attribute("s")&.to_i : nil
               raw_value = nil
+              if current_cells && node.self_closing?
+                current_cells << build_row_entry(cell_ref, coerce_value(raw_value, cell_type, cell_style), values_only)
+                cell_ref = nil
+                cell_type = nil
+                cell_style = nil
+              end
             when "v"
               collecting_value = true
               in_v = true
@@ -278,22 +314,29 @@ module Rbxl
                 raw_value = raw_value ? raw_value << value_buffer : value_buffer.dup
                 collecting_value = false
               end
-            elsif node.depth == row_depth
-              current_cells = pad_row(current_cells, current_row_index, values_only: values_only) if pad_cells
-              current_cells = expand_merged_cells(current_cells, current_row_index, values_only: values_only) if expand_merged
-              yield values_only ? extract_values(current_cells).freeze : Row.new(index: current_row_index, cells: current_cells)
+            elsif current_cells && node.depth == row_depth
+              emit_row(current_cells, current_row_index,
+                       pad_cells: pad_cells, expand_merged: expand_merged,
+                       values_only: values_only, &block)
               last_row_index = current_row_index
               current_row_index = nil
               current_cells = nil
             elsif current_cells && node.depth == row_depth + 1
-              current_cells << build_row_entry(cell_ref, coerce_value(raw_value, cell_type), values_only)
+              current_cells << build_row_entry(cell_ref, coerce_value(raw_value, cell_type, cell_style), values_only)
               cell_ref = nil
               cell_type = nil
+              cell_style = nil
               raw_value = nil
             end
           end
         end
       end
+    end
+
+    def emit_row(cells, row_index, pad_cells:, expand_merged:, values_only:)
+      cells = pad_row(cells, row_index, values_only: values_only) if pad_cells
+      cells = expand_merged_cells(cells, row_index, values_only: values_only) if expand_merged
+      yield values_only ? extract_values(cells).freeze : Row.new(index: row_index, cells: cells)
     end
 
     def with_sheet_reader
@@ -527,7 +570,7 @@ module Rbxl
       @merge_ranges_by_row ||= extract_merge_ranges_by_row
     end
 
-    def coerce_value(raw_value, type)
+    def coerce_value(raw_value, type, style_id = nil)
       case type
       when "s"
         @shared_strings[raw_value.to_i]
@@ -536,8 +579,29 @@ module Rbxl
       when "b"
         raw_value == "1"
       else
-        infer_scalar(raw_value)
+        value = infer_scalar(raw_value)
+        return value unless @date_styles && style_id && value.is_a?(Numeric) && @date_styles[style_id]
+
+        excel_serial_to_ruby(value)
       end
+    end
+
+    # Excel's serial date counts days from 1899-12-31 as serial 1, with a
+    # documented leap-year bug for the non-existent 1900-02-29 (serial 60)
+    # — for serials >= 60 the day-count is shifted back by one so that
+    # post-1900 dates line up with the proleptic Gregorian calendar.
+    # Whole-number serials are returned as +Date+; fractional serials as
+    # +Time+ so that both date and time-of-day survive the conversion.
+    def excel_serial_to_ruby(serial)
+      whole = serial.to_i
+      whole -= 1 if whole >= 60
+      frac = serial - serial.to_i
+      base = Date.new(1899, 12, 31) + whole
+
+      return base if frac.zero?
+
+      seconds = (frac * 86_400).round
+      Time.new(base.year, base.month, base.day) + seconds
     end
 
     def infer_scalar(raw_value)

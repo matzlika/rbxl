@@ -5,12 +5,25 @@ require "zip"
 require_relative "../lib/rbxl"
 
 class RbxlTest < Minitest::Test
-  def test_open_requires_read_only_mode
-    assert_raises(ArgumentError) { Rbxl.open("dummy.xlsx") }
+  def test_open_defaults_to_read_only
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "report.xlsx")
+      book = Rbxl.new
+      book.add_sheet("S") << ["ok"]
+      book.save(path)
+
+      loaded = Rbxl.open(path)
+      assert_equal [["ok"]], loaded.sheet("S").rows(values_only: true).to_a
+      loaded.close
+    end
   end
 
-  def test_new_requires_write_only_mode
-    assert_raises(ArgumentError) { Rbxl.new }
+  def test_open_rejects_read_only_false
+    assert_raises(NotImplementedError) { Rbxl.open("dummy.xlsx", read_only: false) }
+  end
+
+  def test_new_rejects_write_only_false
+    assert_raises(NotImplementedError) { Rbxl.new(write_only: false) }
   end
 
   def test_write_only_then_read_only_round_trip
@@ -330,9 +343,132 @@ class RbxlTest < Minitest::Test
     loaded.close
   end
 
+  def test_each_row_handles_self_closing_rows_and_cells_in_ruby_path
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "selfclose.xlsx")
+      write_minimal_workbook(path, <<~XML)
+        <dimension ref="A1:B3"/><sheetData>
+          <row r="1"><c r="A1" t="inlineStr"><is><t>x</t></is></c><c r="B1"/></row>
+          <row r="2"/>
+          <row r="3"><c r="A3" t="inlineStr"><is><t>y</t></is></c></row>
+        </sheetData>
+      XML
+
+      loaded = Rbxl.open(path)
+      sheet = loaded.sheet("Sheet1")
+      sheet.instance_variable_set(:@disable_native, true)
+      full_rows = sheet.each_row.to_a
+      assert_equal [1, 2, 3], full_rows.map(&:index)
+      assert_equal [["x", nil], [], ["y"]], full_rows.map(&:values)
+
+      sheet = loaded.sheet("Sheet1")
+      sheet.instance_variable_set(:@disable_native, true)
+      value_rows = sheet.each_row(values_only: true).to_a
+      assert_equal [["x", nil], [], ["y"]], value_rows
+      refute_includes value_rows, nil
+
+      loaded.close
+    end
+  end
+
+  def test_date_conversion_returns_time_and_date_objects
+    require "date"
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "dates.xlsx")
+      styles = <<~XML
+        <numFmts count="1"><numFmt numFmtId="200" formatCode="yyyy/mm/dd hh:mm:ss"/></numFmts>
+        <cellXfs count="4">
+          <xf numFmtId="0"/>
+          <xf numFmtId="14"/>
+          <xf numFmtId="22"/>
+          <xf numFmtId="200"/>
+        </cellXfs>
+      XML
+      sheet_xml = <<~XML
+        <dimension ref="A1:D1"/><sheetData>
+          <row r="1">
+            <c r="A1" s="0"><v>3.14</v></c>
+            <c r="B1" s="1"><v>44562</v></c>
+            <c r="C1" s="2"><v>44562.5</v></c>
+            <c r="D1" s="3"><v>44562.75</v></c>
+          </row>
+        </sheetData>
+      XML
+      write_minimal_workbook(path, sheet_xml, styles: styles)
+
+      loaded = Rbxl.open(path, date_conversion: true)
+      row = loaded.sheet("Sheet1").rows(values_only: true).first
+      assert_equal 3.14, row[0]
+      assert_equal Date.new(2022, 1, 1), row[1]
+      assert_kind_of Time, row[2]
+      assert_equal Time.new(2022, 1, 1, 12, 0, 0), row[3] - (6 * 3600)
+      loaded.close
+
+      loaded_default = Rbxl.open(path)
+      default_row = loaded_default.sheet("Sheet1").rows(values_only: true).first
+      assert_equal [3.14, 44562, 44562.5, 44562.75], default_row
+      loaded_default.close
+    end
+  end
+
   private
 
   def fixture_path(name)
     File.join(__dir__, "fixtures", name)
+  end
+
+  def write_minimal_workbook(path, sheet_body, styles: nil)
+    Zip::File.open(path, Zip::File::CREATE) do |zf|
+      zf.get_output_stream("[Content_Types].xml") do |s|
+        s.write <<~XML
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+            <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+            <Default Extension="xml" ContentType="application/xml"/>
+            <Override PartName="/xl/workbook.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml"/>
+            <Override PartName="/xl/worksheets/sheet1.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.worksheet+xml"/>
+            #{styles ? '<Override PartName="/xl/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.spreadsheetml.styles+xml"/>' : ''}
+          </Types>
+        XML
+      end
+      zf.get_output_stream("_rels/.rels") do |s|
+        s.write <<~XML
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+            <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="xl/workbook.xml"/>
+          </Relationships>
+        XML
+      end
+      zf.get_output_stream("xl/workbook.xml") do |s|
+        s.write <<~XML
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+            <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
+          </workbook>
+        XML
+      end
+      zf.get_output_stream("xl/_rels/workbook.xml.rels") do |s|
+        s.write <<~XML
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+            <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/worksheet" Target="worksheets/sheet1.xml"/>
+          </Relationships>
+        XML
+      end
+      zf.get_output_stream("xl/worksheets/sheet1.xml") do |s|
+        s.write <<~XML
+          <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+          <worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">#{sheet_body}</worksheet>
+        XML
+      end
+      if styles
+        zf.get_output_stream("xl/styles.xml") do |s|
+          s.write <<~XML
+            <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+            <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">#{styles}</styleSheet>
+          XML
+        end
+      end
+    end
   end
 end

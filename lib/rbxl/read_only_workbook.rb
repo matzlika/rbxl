@@ -36,14 +36,17 @@ module Rbxl
     # @return [Array<String>] visible sheet names in workbook order
     attr_reader :sheet_names
 
-    # Convenience constructor equivalent to <tt>new(path, streaming:)</tt>.
+    # Convenience constructor equivalent to
+    # <tt>new(path, streaming:, date_conversion:)</tt>.
     #
     # @param path [String, #to_path] path to the <tt>.xlsx</tt> file
     # @param streaming [Boolean] feed worksheet XML to the native parser in
     #   chunks (see {Rbxl.open})
+    # @param date_conversion [Boolean] convert numeric cells backed by a
+    #   date/time +numFmt+ to Ruby date/time objects (see {Rbxl.open})
     # @return [Rbxl::ReadOnlyWorkbook]
-    def self.open(path, streaming: false)
-      new(path, streaming: streaming)
+    def self.open(path, streaming: false, date_conversion: false)
+      new(path, streaming: streaming, date_conversion: date_conversion)
     end
 
     # Opens the ZIP archive, pre-loads shared strings, and indexes the
@@ -51,13 +54,17 @@ module Rbxl
     #
     # @param path [String, #to_path] path to the <tt>.xlsx</tt> file
     # @param streaming [Boolean] forwarded to produced worksheets
-    def initialize(path, streaming: false)
+    # @param date_conversion [Boolean] lazily load styles.xml and forward the
+    #   date-style lookup table to produced worksheets
+    def initialize(path, streaming: false, date_conversion: false)
       @path = path
       @zip = Zip::File.open(path)
       @streaming = streaming
+      @date_conversion = date_conversion
       @shared_strings = load_shared_strings
       @sheet_entries = load_sheet_entries
       @sheet_names = @sheet_entries.keys.freeze
+      @date_styles = nil
       @closed = false
     end
 
@@ -77,7 +84,14 @@ module Rbxl
         raise SheetNotFoundError, "sheet not found: #{name}"
       end
 
-      ReadOnlyWorksheet.new(zip: @zip, entry_path: entry_path, shared_strings: @shared_strings, name: name, streaming: @streaming)
+      ReadOnlyWorksheet.new(
+        zip: @zip,
+        entry_path: entry_path,
+        shared_strings: @shared_strings,
+        name: name,
+        streaming: @streaming,
+        date_styles: date_styles
+      )
     end
 
     # Releases the underlying ZIP file handle. Idempotent; subsequent calls
@@ -100,6 +114,65 @@ module Rbxl
 
     def ensure_open!
       raise ClosedWorkbookError, "workbook has been closed" if closed?
+    end
+
+    # Built-in numFmtId values that Excel resolves to date/time formats.
+    # Ids outside this set are dates only when the workbook provides a
+    # matching custom +<numFmt>+ entry whose format code contains date
+    # tokens. See ECMA-376 part 1 §18.8.30.
+    BUILTIN_DATE_FMT_IDS = Set.new([14, 15, 16, 17, 18, 19, 20, 21, 22,
+                                    27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
+                                    45, 46, 47, 50, 51, 52, 53, 54, 55, 56,
+                                    57, 58]).freeze
+
+    def date_styles
+      return nil unless @date_conversion
+
+      @date_styles ||= load_date_styles
+    end
+
+    def load_date_styles
+      entry = @zip.find_entry("xl/styles.xml")
+      return [].freeze unless entry
+
+      custom_date_ids = Set.new
+      date_styles = []
+      in_cell_xfs = false
+
+      each_xml_node("xl/styles.xml") do |node|
+        case node.node_type
+        when Nokogiri::XML::Reader::TYPE_ELEMENT
+          case node.local_name
+          when "cellXfs"
+            in_cell_xfs = true
+          when "numFmt"
+            id = node.attribute("numFmtId")
+            code = node.attribute("formatCode")
+            custom_date_ids << id.to_i if id && code && date_format_code?(code)
+          when "xf"
+            next unless in_cell_xfs
+
+            fmt_id_int = node.attribute("numFmtId")&.to_i
+            date_styles << (!fmt_id_int.nil? &&
+                            (BUILTIN_DATE_FMT_IDS.include?(fmt_id_int) || custom_date_ids.include?(fmt_id_int)))
+          end
+        when Nokogiri::XML::Reader::TYPE_END_ELEMENT
+          in_cell_xfs = false if node.local_name == "cellXfs"
+        end
+      end
+
+      date_styles.freeze
+    end
+
+    # Quoted literals, bracketed directives (e.g. [Red], [$-409]), and
+    # backslash-escaped characters never introduce date tokens, so strip
+    # them before looking for +y/m/d/h/s+.
+    def date_format_code?(code)
+      stripped = code.dup
+      stripped.gsub!(/\[[^\]]*\]/, "")
+      stripped.gsub!(/"[^"]*"/, "")
+      stripped.gsub!(/\\./, "")
+      stripped.match?(/[ymdhs]/i)
     end
 
     def load_shared_strings

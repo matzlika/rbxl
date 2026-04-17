@@ -12,15 +12,14 @@ Fast, memory-friendly Ruby gem for row-by-row `.xlsx` reads and append-only writ
 The API is intentionally small and `openpyxl`-inspired, with an optional
 native extension for faster XML parsing when you need more throughput.
 
-Current scope is intentionally small:
+Supported:
 
-- `write_only` workbook generation
-- `read_only` row-by-row iteration
-- `close()` for read-only workbooks
-- minimal `openpyxl`-like API
+- write-only workbook generation
+- read-only row-by-row iteration
+- opt-in date/time conversion driven by the workbook's `numFmt` styles
 - optional C extension (`rbxl/native`) for maximum performance
 
-Out of scope for this MVP:
+Out of scope:
 
 - preserving arbitrary workbook structure on save
 - rich style round-tripping
@@ -31,7 +30,7 @@ Out of scope for this MVP:
 ```ruby
 require "rbxl"
 
-book = Rbxl.new(write_only: true)
+book = Rbxl.new
 sheet = book.add_sheet("Report")
 sheet.append(["id", "name", "score"])
 sheet.append([1, "alice", 100])
@@ -42,7 +41,7 @@ book.save("report.xlsx")
 ```ruby
 require "rbxl"
 
-book = Rbxl.open("report.xlsx", read_only: true)
+book = Rbxl.open("report.xlsx")
 sheet = book.sheet("Report")
 
 sheet.each_row do |row|
@@ -54,8 +53,38 @@ p sheet.calculate_dimension
 book.close
 ```
 
-`write_only` workbooks are save-once by design. This matches the optimized
-mode tradeoff: low flexibility in exchange for simpler memory behavior.
+`Rbxl.open` defaults to read-only and `Rbxl.new` defaults to write-only;
+the `read_only:` / `write_only:` keywords remain for call-site clarity and
+to leave room for a future read/write mode. Write-only workbooks are
+save-once by design — this matches the optimized mode tradeoff: low
+flexibility in exchange for simpler memory behavior.
+
+### Date / time conversion
+
+Numeric cells in `.xlsx` files are serial days since 1899-12-31; whether
+they display as `44562`, `2022-01-01`, or `12:00` depends on the cell's
+`numFmt` style. `rbxl` leaves cells as raw `Float` by default so the read
+path stays allocation-light. Pass `date_conversion: true` to opt into
+interpreting the style:
+
+```ruby
+require "rbxl"
+
+book = Rbxl.open("schedule.xlsx", date_conversion: true)
+book.sheet("Timeline").each_row(values_only: true) do |row|
+  row.each { |v| p v }  # => Date / Time / Float / String / ...
+end
+book.close
+```
+
+With the flag on, `rbxl` parses `xl/styles.xml` once at first use and
+converts numeric cells whose style maps to a built-in date `numFmtId`
+(14–22, 27–36, 45–47, 50–58) or to a custom `formatCode` containing date
+tokens. Whole-number serials return `Date`; fractional serials return
+`Time` so the time-of-day portion is preserved. The flag is off by
+default; leaving it off skips the styles parse entirely and keeps the
+native fast path in use. Turning it on routes reads through the pure-Ruby
+worksheet parser.
 
 ## Native C Extension
 

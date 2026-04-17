@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.3
+
+- `Rbxl.open` and `Rbxl.new` now default `read_only: true` and `write_only: true` respectively, so the call site no longer needs the boilerplate. Explicitly passing `false` raises `NotImplementedError`.
+- Add `date_conversion: true` to `Rbxl.open`: numeric cells whose style points at a date/time `numFmt` (built-in ids 14–22, 27–36, 45–47, 50–58, or a custom format code containing date tokens) are returned as `Date` or `Time`. Off by default — no change in output shape or throughput when the flag is absent.
+- Fix Ruby reader path so self-closing `<row/>` and `<c/>` elements are iterated instead of silently dropped, and never yield `nil` for a row.
+
 ## 1.0.2
 
 - Add `streaming: true` to `Rbxl.open` to feed worksheet XML to the native reader in 64 KiB chunks instead of buffering the full worksheet first.
