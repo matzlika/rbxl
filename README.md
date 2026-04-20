@@ -21,11 +21,21 @@ Supported:
 
 Out of scope:
 
+- in-place editing of an existing `.xlsx` file — rbxl opens workbooks
+  read-only and generates new workbooks write-only, with no read-modify-save
+  path. If you need to open a file, tweak a handful of cells, and write it
+  back preserving everything else, use a full-object-model library instead.
 - preserving arbitrary workbook structure on save
 - rich style round-tripping
 - formulas, images, charts, comments
 
 ## Usage
+
+`Rbxl.open` defaults to read-only and `Rbxl.new` defaults to write-only;
+the `read_only:` / `write_only:` keywords remain for call-site clarity and
+to leave room for a future read/write mode.
+
+### Writing a new workbook
 
 ```ruby
 require "rbxl"
@@ -37,6 +47,23 @@ sheet.append([1, "alice", 100])
 sheet.append([2, "bob", 95.5])
 book.save("report.xlsx")
 ```
+
+Write-only workbooks follow three rules:
+
+- **Append-only within a sheet.** `sheet.append(row)` is the only way to
+  add data. There is no random-access cell write, no mid-stream edit of a
+  previously appended row.
+- **Save-once per workbook.** `save` flushes the full `.xlsx` package in a
+  single pass and then closes the workbook. Calling `save` or `add_sheet`
+  again raises `Rbxl::WorkbookAlreadySavedError`. To produce another file,
+  start a new `Rbxl.new`.
+- **No read-modify-save.** rbxl cannot open an existing `.xlsx` and write
+  back to it (see Out of scope above).
+
+This is the tradeoff that keeps memory flat: rbxl buffers rows per sheet
+and never materializes a full workbook object graph.
+
+### Reading a workbook
 
 ```ruby
 require "rbxl"
@@ -53,11 +80,109 @@ p sheet.calculate_dimension
 book.close
 ```
 
-`Rbxl.open` defaults to read-only and `Rbxl.new` defaults to write-only;
-the `read_only:` / `write_only:` keywords remain for call-site clarity and
-to leave room for a future read/write mode. Write-only workbooks are
-save-once by design — this matches the optimized mode tradeoff: low
-flexibility in exchange for simpler memory behavior.
+### Reading recipes
+
+**Plain value arrays (fastest path).** Use `values_only: true` when you
+only care about the cell values, not their coordinates. Rows come back as
+frozen `Array<Object>`:
+
+```ruby
+book.sheet("Data").each_row(values_only: true) do |values|
+  id, name, score = values
+  # ...
+end
+```
+
+**Cell objects with coordinates.** Default `each_row` yields a
+`Rbxl::Row` wrapping `Rbxl::ReadOnlyCell`s. Use this when you need the
+Excel coordinate alongside the value:
+
+```ruby
+book.sheet("Data").each_row do |row|
+  row.index              # => 2 (1-based worksheet row number)
+  row[0].coordinate      # => "A2"
+  row[0].value           # => "alice"
+  row.values             # => ["alice", 100, true]
+end
+```
+
+**Skip the header row.** `each_row` without a block returns an
+`Enumerator`, so chain `drop`:
+
+```ruby
+book.sheet("Data").each_row(values_only: true).drop(1).each do |row|
+  # ...
+end
+```
+
+**Peek at the first N rows.** `rows(...)` is an enumerator-returning
+alias that composes well with `take`, `first`, `lazy`, etc.:
+
+```ruby
+book.sheet("Data").rows(values_only: true).first(5)
+```
+
+**Know the data range up-front.** When the workbook has a stored
+dimension, these are O(1) lookups; otherwise pass `force: true` to scan:
+
+```ruby
+sheet = book.sheet("Data")
+sheet.max_row              # => 500
+sheet.max_column           # => 12
+sheet.calculate_dimension  # => "A1:L500"
+```
+
+**Pad sparse rows to the sheet width.** Without `pad_cells`, a row
+containing only `A1` and `C1` yields two cells. With `pad_cells: true`,
+missing cells are filled with `Rbxl::EmptyCell` (or `nil` in values-only
+mode), aligned to `max_column`:
+
+```ruby
+book.sheet("Sparse").each_row(pad_cells: true, values_only: true).first
+# => ["left", nil, "right"]
+```
+
+**Expand merged cells.** Excel leaves the anchor cell populated and the
+rest of the merge range empty. Pass `expand_merged: true` to propagate
+the anchor value across the full range; combine with `pad_cells: true`
+when you want the result aligned to the sheet's width:
+
+```ruby
+sheet = book.sheet("Merged")
+
+sheet.rows(values_only: true).to_a
+# => [["group", "solo"], ["tail"]]
+
+sheet.rows(values_only: true, pad_cells: true, expand_merged: true).to_a
+# => [["group", "group", "solo", nil],
+#     ["group", "group", "solo", "tail"]]
+```
+
+**List sheets before opening any.** Sheet XML is only read on first
+iteration; enumerating names is cheap:
+
+```ruby
+book.sheet_names        # => ["Summary", "Detail", "Raw"]
+book.sheet("Detail").each_row(values_only: true) { |row| ... }
+```
+
+**Locate a bad input.** All rbxl exceptions inherit from `Rbxl::Error`
+and the messages carry the workbook path and (where relevant) the sheet
+name, XML entry, or cell coordinate. Rescue at the sheet level:
+
+```ruby
+begin
+  book.sheet("Raw").each_row(values_only: true) { |row| ... }
+rescue Rbxl::WorksheetFormatError, Rbxl::WorkbookFormatError => e
+  warn e.message  # includes workbook path and sheet/entry
+rescue Rbxl::CellValueError => e
+  warn e.message  # includes workbook path, sheet, and coordinate
+end
+```
+
+`Rbxl::CellValueError` is raised by the cell decoder when
+`date_conversion: true` is active. The reader is forward-only, so rescue
+terminates iteration rather than skipping to the next row.
 
 ### Date / time conversion
 

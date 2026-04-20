@@ -1,31 +1,88 @@
 # Changelog
 
-## 1.2.0
+All notable changes to this project are documented here. The format is based
+on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
+follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-- Honor Excel's `date1904` workbook setting when `date_conversion: true` is enabled, so Mac-originated workbooks map serial dates to the correct Ruby `Date` and `Time` values.
-- Raise `WorkbookFormatError` / `WorksheetFormatError` with the workbook path and XML entry or sheet name when parsing malformed `.xlsx` metadata or worksheet XML.
-- Expand reader coverage around malformed workbook and worksheet XML so bad inputs fail with location-aware errors instead of generic parser exceptions.
+## [Unreleased]
 
-## 1.1.0
+## [1.2.0]
 
-- `Rbxl.open` and `Rbxl.new` now default `read_only: true` and `write_only: true` respectively, so the call site no longer needs the boilerplate. Explicitly passing `false` raises `NotImplementedError`.
-- Add `date_conversion: true` to `Rbxl.open`: numeric cells whose style points at a date/time `numFmt` (built-in ids 14–22, 27–36, 45–47, 50–58, or a custom format code containing date tokens) are returned as `Date` or `Time`. Off by default — no change in output shape or throughput when the flag is absent.
-- Fix Ruby reader path so self-closing `<row/>` and `<c/>` elements are iterated instead of silently dropped, and never yield `nil` for a row.
+### Changed
 
-## 1.0.2
+- `WorkbookAlreadySavedError` message now points at the save-once design and
+  the next action (open a fresh `Rbxl.new` for another file) so callers who
+  trip on the constraint don't have to read the source to understand why.
+- Workbook- and worksheet-level parse failures raise `WorkbookFormatError` /
+  `WorksheetFormatError` with the workbook path and the XML entry or sheet
+  name in the message, replacing generic parser exceptions.
 
-- Add `streaming: true` to `Rbxl.open` to feed worksheet XML to the native reader in 64 KiB chunks instead of buffering the full worksheet first.
-- Add `Rbxl.max_worksheet_bytes` and `Rbxl::WorksheetTooLargeError` so streaming reads can stop oversized worksheet XML entries mid-inflate.
+### Added
+
+- Location-aware coverage around malformed workbook and worksheet XML so bad
+  inputs surface the specific entry that failed rather than bubbling up an
+  unlabelled `Nokogiri::XML::SyntaxError`.
+- README sections covering the write-only model (append-only, save-once,
+  no in-place edit), a "Reading recipes" walkthrough, and an explicit Out
+  of scope entry for read-modify-save workflows.
+
+### Fixed
+
+- Honor Excel's `date1904` workbook setting when `date_conversion: true` is
+  enabled, so Mac-originated workbooks map serial dates to the correct Ruby
+  `Date` and `Time` values.
+
+## [1.1.0] - 2026-04-21
+
+### Added
+
+- `date_conversion: true` option for `Rbxl.open`: numeric cells whose style
+  points at a date/time `numFmt` (built-in ids 14–22, 27–36, 45–47, 50–58,
+  or a custom format code containing date tokens) are returned as `Date`
+  or `Time`. Off by default — no change in output shape or throughput when
+  the flag is absent.
+
+### Changed
+
+- `Rbxl.open` and `Rbxl.new` now default `read_only: true` and
+  `write_only: true` respectively, so the call site no longer needs the
+  boilerplate. Explicitly passing `false` raises `NotImplementedError`.
+
+### Fixed
+
+- Ruby reader path now iterates self-closing `<row/>` and `<c/>` elements
+  instead of silently dropping them, and never yields `nil` for a row.
+
+## [1.0.2] - 2026-04-17
+
+### Added
+
+- `streaming: true` option for `Rbxl.open` feeds worksheet XML to the
+  native reader in 64 KiB chunks instead of buffering the full worksheet
+  first.
+- `Rbxl.max_worksheet_bytes` configuration and `Rbxl::WorksheetTooLargeError`
+  so streaming reads can stop oversized worksheet XML entries mid-inflate.
+
+### Changed
+
 - Expand RDoc coverage across the public API.
 - Tighten RBS signatures to match the actual runtime types.
-- Reword public docs and gem metadata to describe reads as row-by-row and writes as append-only, reserving "streaming" for the new opt-in native read path.
+- Reword public docs and gem metadata to describe reads as row-by-row and
+  writes as append-only, reserving "streaming" for the new opt-in native
+  read path.
 
-## 1.0.1
+## [1.0.1] - 2026-04-16
 
-- Fix ZIP64 handling.
-- Add Go and Rust benchmark comparisons.
-- Align `rbxl/native` with Nokogiri's libxml2 to avoid mixed-library warnings at runtime.
+### Added
 
-## 1.0.0
+- Go and Rust benchmark comparisons.
 
-- Initial 1.0 release.
+### Fixed
+
+- ZIP64 handling.
+- Align `rbxl/native` with Nokogiri's libxml2 to avoid mixed-library
+  warnings at runtime.
+
+## [1.0.0] - 2026-04-16
+
+- Initial public release.
