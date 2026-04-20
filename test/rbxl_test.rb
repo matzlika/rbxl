@@ -411,13 +411,75 @@ class RbxlTest < Minitest::Test
     end
   end
 
+  def test_date_conversion_honors_1904_date_system
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "dates_1904.xlsx")
+      styles = <<~XML
+        <cellXfs count="2">
+          <xf numFmtId="0"/>
+          <xf numFmtId="14"/>
+        </cellXfs>
+      XML
+      sheet_xml = <<~XML
+        <dimension ref="A1:B1"/><sheetData>
+          <row r="1">
+            <c r="A1" s="1"><v>0</v></c>
+            <c r="B1" s="1"><v>1.5</v></c>
+          </row>
+        </sheetData>
+      XML
+      write_minimal_workbook(path, sheet_xml, styles: styles, workbook_pr: '<workbookPr date1904="1"/>')
+
+      loaded = Rbxl.open(path, date_conversion: true)
+      row = loaded.sheet("Sheet1").rows(values_only: true).first
+
+      assert_equal Date.new(1904, 1, 1), row[0]
+      assert_equal Time.new(1904, 1, 2, 12, 0, 0), row[1]
+      loaded.close
+    end
+  end
+
+  def test_invalid_workbook_xml_reports_path_and_entry
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "broken_workbook.xlsx")
+      write_minimal_workbook(path, "<sheetData/>")
+
+      Zip::File.open(path) do |zf|
+        zf.get_output_stream("xl/workbook.xml") { |s| s.write("<workbook") }
+      end
+
+      err = assert_raises(Rbxl::WorkbookFormatError) { Rbxl.open(path) }
+      assert_includes err.message, path
+      assert_includes err.message, "xl/workbook.xml"
+    end
+  end
+
+  def test_invalid_worksheet_xml_reports_path_and_sheet
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "broken_sheet.xlsx")
+      write_minimal_workbook(path, "<sheetData/>")
+
+      Zip::File.open(path) do |zf|
+        zf.get_output_stream("xl/worksheets/sheet1.xml") { |s| s.write('<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main"><sheetData><row') }
+      end
+
+      loaded = Rbxl.open(path)
+      err = assert_raises(Rbxl::WorksheetFormatError) do
+        loaded.sheet("Sheet1").rows(values_only: true).to_a
+      end
+      assert_includes err.message, path
+      assert_includes err.message, "Sheet1"
+      loaded.close
+    end
+  end
+
   private
 
   def fixture_path(name)
     File.join(__dir__, "fixtures", name)
   end
 
-  def write_minimal_workbook(path, sheet_body, styles: nil)
+  def write_minimal_workbook(path, sheet_body, styles: nil, workbook_pr: nil)
     Zip::File.open(path, Zip::File::CREATE) do |zf|
       zf.get_output_stream("[Content_Types].xml") do |s|
         s.write <<~XML
@@ -443,6 +505,7 @@ class RbxlTest < Minitest::Test
         s.write <<~XML
           <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
           <workbook xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+            #{workbook_pr}
             <sheets><sheet name="Sheet1" sheetId="1" r:id="rId1"/></sheets>
           </workbook>
         XML

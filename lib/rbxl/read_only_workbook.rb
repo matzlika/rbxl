@@ -65,6 +65,7 @@ module Rbxl
       @sheet_entries = load_sheet_entries
       @sheet_names = @sheet_entries.keys.freeze
       @date_styles = nil
+      @date_1904 = nil
       @closed = false
     end
 
@@ -87,10 +88,12 @@ module Rbxl
       ReadOnlyWorksheet.new(
         zip: @zip,
         entry_path: entry_path,
+        workbook_path: @path,
         shared_strings: @shared_strings,
         name: name,
         streaming: @streaming,
-        date_styles: date_styles
+        date_styles: date_styles,
+        date_1904: date_1904?
       )
     end
 
@@ -129,6 +132,13 @@ module Rbxl
       return nil unless @date_conversion
 
       @date_styles ||= load_date_styles
+    end
+
+    def date_1904?
+      return false unless @date_conversion
+
+      @date_1904 = load_date_1904 if @date_1904.nil?
+      @date_1904
     end
 
     def load_date_styles
@@ -268,11 +278,25 @@ module Rbxl
         rid = node.attribute("r:id")
         next unless name && rid
 
-        target = relationships.fetch(rid)
+        target = relationships.fetch(rid) do
+          raise WorkbookFormatError,
+                "workbook #{@path} references missing relationship #{rid.inspect} for sheet #{name.inspect}"
+        end
         sheets[name] = "xl/#{target}".gsub(%r{/+}, "/")
       end
 
       sheets
+    end
+
+    def load_date_1904
+      each_xml_node("xl/workbook.xml") do |node|
+        next unless node.node_type == Nokogiri::XML::Reader::TYPE_ELEMENT
+        next unless node.local_name == "workbookPr"
+
+        return xml_truthy?(node.attribute("date1904"))
+      end
+
+      false
     end
 
     def load_relationship_targets(entry_path)
@@ -293,11 +317,20 @@ module Rbxl
     end
 
     def each_xml_node(entry_path)
-      io = @zip.get_entry(entry_path).get_input_stream
+      entry = @zip.get_entry(entry_path)
+      raise WorkbookFormatError, "workbook #{@path} is missing required entry #{entry_path.inspect}" unless entry
+
+      io = entry.get_input_stream
       reader = Nokogiri::XML::Reader(io)
       reader.each { |node| yield node }
+    rescue Nokogiri::XML::SyntaxError => e
+      raise WorkbookFormatError, "invalid workbook XML in #{@path} at #{entry_path}: #{e.message}"
     ensure
       io&.close
+    end
+
+    def xml_truthy?(value)
+      value == "1" || value == "true"
     end
   end
 end

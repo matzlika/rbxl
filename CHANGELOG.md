@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.2.0
+
+- Honor Excel's `date1904` workbook setting when `date_conversion: true` is enabled, so Mac-originated workbooks map serial dates to the correct Ruby `Date` and `Time` values.
+- Raise `WorkbookFormatError` / `WorksheetFormatError` with the workbook path and XML entry or sheet name when parsing malformed `.xlsx` metadata or worksheet XML.
+- Expand reader coverage around malformed workbook and worksheet XML so bad inputs fail with location-aware errors instead of generic parser exceptions.
+
 ## 1.1.0
 
 - `Rbxl.open` and `Rbxl.new` now default `read_only: true` and `write_only: true` respectively, so the call site no longer needs the boilerplate. Explicitly passing `false` raises `NotImplementedError`.
