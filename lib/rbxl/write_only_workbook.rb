@@ -96,7 +96,7 @@ module Rbxl
     private
 
     def ensure_writable!
-      raise WorkbookAlreadySavedError, "write-only workbook can only be saved once" if @saved
+      raise WorkbookAlreadySavedError, "write-only workbook can only be saved once by design; call Rbxl.new to build another workbook" if @saved
       raise ClosedWorkbookError, "workbook has been closed" if closed?
     end
 

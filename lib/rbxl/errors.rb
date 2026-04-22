@@ -33,4 +33,17 @@ module Rbxl
   # bytes consumed from the ZIP entry, so high-compression zip-bomb style
   # worksheets are stopped mid-inflate rather than after the fact.
   class WorksheetTooLargeError < Error; end
+
+  # Raised when workbook-level XML is malformed or internally inconsistent,
+  # for example when +xl/workbook.xml+ cannot be parsed or references a
+  # missing relationship target.
+  class WorkbookFormatError < Error; end
+
+  # Raised when a worksheet XML entry cannot be parsed into rows.
+  class WorksheetFormatError < Error; end
+
+  # Raised when a specific cell cannot be decoded. The message includes the
+  # workbook path, sheet name, and cell coordinate to make bad inputs easy
+  # to locate.
+  class CellValueError < WorksheetFormatError; end
 end

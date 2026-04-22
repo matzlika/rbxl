@@ -50,6 +50,7 @@ module Rbxl
 
     # @param zip [Zip::File] open archive shared with the workbook
     # @param entry_path [String] ZIP entry path for this sheet's XML
+    # @param workbook_path [String] filesystem path the workbook was opened from
     # @param shared_strings [Array<String>] pre-decoded shared strings table
     # @param name [String] visible sheet name
     # @param streaming [Boolean] when the native extension is loaded, feed
@@ -59,13 +60,17 @@ module Rbxl
     #   id's numFmt is a date/time format. When provided, numeric cells with
     #   a matching style are returned as +Date+ or +Time+ instead of +Float+,
     #   and the native fast path is bypassed.
-    def initialize(zip:, entry_path:, shared_strings:, name:, streaming: false, date_styles: nil)
+    # @param date_1904 [Boolean] whether the workbook uses Excel's 1904 date
+    #   system instead of the default 1900 date system
+    def initialize(zip:, entry_path:, workbook_path:, shared_strings:, name:, streaming: false, date_styles: nil, date_1904: false)
       @zip = zip
       @entry_path = entry_path
+      @workbook_path = workbook_path
       @shared_strings = shared_strings
       @name = name
       @streaming = streaming
       @date_styles = date_styles
+      @date_1904 = date_1904
       @disable_native = !date_styles.nil?
       @dimensions = extract_dimensions
       @merge_ranges_by_row = nil
@@ -171,6 +176,7 @@ module Rbxl
 
       cell_type = nil
       cell_style = nil
+      cell_ref = nil
       collecting_value = false
       in_v = false
       raw_value = nil
@@ -178,6 +184,7 @@ module Rbxl
       current_values = nil
       row_depth = nil
       track_style = !@date_styles.nil?
+      wrap_cell_errors = track_style
 
       with_sheet_reader do |reader|
         reader.each do |node|
@@ -192,13 +199,20 @@ module Rbxl
                 current_values = nil
               end
             when "c"
+              cell_ref = node.attribute("r")
               cell_type = node.attribute("t")
               cell_style = track_style ? node.attribute("s")&.to_i : nil
               raw_value = nil
               if current_values && node.self_closing?
-                current_values << coerce_value(raw_value, cell_type, cell_style)
+                value = if wrap_cell_errors
+                          coerce_cell_value(raw_value, cell_type, cell_style, cell_ref)
+                        else
+                          coerce_value(raw_value, cell_type, cell_style)
+                        end
+                current_values << value
                 cell_type = nil
                 cell_style = nil
+                cell_ref = nil
               end
             when "v"
               collecting_value = true
@@ -224,9 +238,15 @@ module Rbxl
               yield current_values.freeze
               current_values = nil
             elsif current_values && node.depth == row_depth + 1
-              current_values << coerce_value(raw_value, cell_type, cell_style)
+              value = if wrap_cell_errors
+                        coerce_cell_value(raw_value, cell_type, cell_style, cell_ref)
+                      else
+                        coerce_value(raw_value, cell_type, cell_style)
+                      end
+              current_values << value
               cell_type = nil
               cell_style = nil
+              cell_ref = nil
               raw_value = nil
             end
           end
@@ -258,6 +278,7 @@ module Rbxl
       value_buffer = +""
       row_depth = nil
       track_style = !@date_styles.nil?
+      wrap_cell_errors = track_style
 
       with_sheet_reader do |reader|
         reader.each do |node|
@@ -289,7 +310,12 @@ module Rbxl
               cell_style = track_style ? node.attribute("s")&.to_i : nil
               raw_value = nil
               if current_cells && node.self_closing?
-                current_cells << build_row_entry(cell_ref, coerce_value(raw_value, cell_type, cell_style), values_only)
+                value = if wrap_cell_errors
+                          coerce_cell_value(raw_value, cell_type, cell_style, cell_ref)
+                        else
+                          coerce_value(raw_value, cell_type, cell_style)
+                        end
+                current_cells << build_row_entry(cell_ref, value, values_only)
                 cell_ref = nil
                 cell_type = nil
                 cell_style = nil
@@ -322,7 +348,12 @@ module Rbxl
               current_row_index = nil
               current_cells = nil
             elsif current_cells && node.depth == row_depth + 1
-              current_cells << build_row_entry(cell_ref, coerce_value(raw_value, cell_type, cell_style), values_only)
+              value = if wrap_cell_errors
+                        coerce_cell_value(raw_value, cell_type, cell_style, cell_ref)
+                      else
+                        coerce_value(raw_value, cell_type, cell_style)
+                      end
+              current_cells << build_row_entry(cell_ref, value, values_only)
               cell_ref = nil
               cell_type = nil
               cell_style = nil
@@ -340,9 +371,14 @@ module Rbxl
     end
 
     def with_sheet_reader
-      io = @zip.get_entry(@entry_path).get_input_stream
+      entry = @zip.get_entry(@entry_path)
+      raise WorksheetFormatError, "worksheet #{@name.inspect} is missing XML entry #{@entry_path.inspect} in #{@workbook_path}" unless entry
+
+      io = entry.get_input_stream
       reader = Nokogiri::XML::Reader(io)
       yield reader
+    rescue Nokogiri::XML::SyntaxError => e
+      raise WorksheetFormatError, "invalid worksheet XML for sheet #{@name.inspect} in #{@workbook_path}: #{e.message}"
     ensure
       io&.close
     end
@@ -352,7 +388,10 @@ module Rbxl
       max_bytes = Rbxl.max_worksheet_bytes
       Rbxl::Native.public_send(method_name, io, @shared_strings, max_bytes, &block)
     rescue RuntimeError => e
-      raise WorksheetTooLargeError, e.message if e.message&.include?("worksheet bytes exceed limit")
+      if e.message&.include?("worksheet bytes exceed limit")
+        raise WorksheetTooLargeError,
+              "worksheet #{@name.inspect} in #{@workbook_path}: #{e.message}"
+      end
 
       raise
     ensure
@@ -586,6 +625,13 @@ module Rbxl
       end
     end
 
+    def coerce_cell_value(raw_value, type, style_id, coordinate)
+      coerce_value(raw_value, type, style_id)
+    rescue StandardError => e
+      raise CellValueError,
+            "failed to decode cell #{coordinate || '(unknown coordinate)'} on sheet #{@name.inspect} in #{@workbook_path}: #{e.message}"
+    end
+
     # Excel's serial date counts days from 1899-12-31 as serial 1, with a
     # documented leap-year bug for the non-existent 1900-02-29 (serial 60)
     # — for serials >= 60 the day-count is shifted back by one so that
@@ -594,9 +640,15 @@ module Rbxl
     # +Time+ so that both date and time-of-day survive the conversion.
     def excel_serial_to_ruby(serial)
       whole = serial.to_i
-      whole -= 1 if whole >= 60
       frac = serial - serial.to_i
-      base = Date.new(1899, 12, 31) + whole
+
+      base =
+        if @date_1904
+          Date.new(1904, 1, 1) + whole
+        else
+          whole -= 1 if whole >= 60
+          Date.new(1899, 12, 31) + whole
+        end
 
       return base if frac.zero?
 
