@@ -16,6 +16,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   a `.xlsx` container. Legacy `.xls` (BIFF/CFB) inputs are detected by the
   OLE compound-file magic and reported with a conversion hint, instead of
   surfacing an opaque `Zip::Error` from rubyzip five frames deep.
+- `Rbxl::ReadOnlyWorkbook#sheet` now accepts an integer index into
+  `sheet_names` (including negatives, so `sheet(-1)` returns the last
+  sheet), for the common single-sheet case where `book.sheet(0)` reads
+  cleaner than `book.sheet(book.sheet_names.first)`.
 
 ## [1.2.0] - 2026-04-23
 

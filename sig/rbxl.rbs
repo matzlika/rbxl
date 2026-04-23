@@ -90,7 +90,7 @@ module Rbxl
     def self.open: (pathish path, ?streaming: bool, ?date_conversion: bool) -> ReadOnlyWorkbook
                  | [T] (pathish path, ?streaming: bool, ?date_conversion: bool) { (ReadOnlyWorkbook) -> T } -> T
     def initialize: (pathish path, ?streaming: bool, ?date_conversion: bool) -> void
-    def sheet: (String name) -> ReadOnlyWorksheet
+    def sheet: (String | Integer name_or_index) -> ReadOnlyWorksheet
     def close: () -> void
     def closed?: () -> bool
   end

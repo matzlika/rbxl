@@ -59,6 +59,41 @@ class RbxlTest < Minitest::Test
     end
   end
 
+  def test_sheet_accepts_integer_index
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "multi.xlsx")
+
+      book = Rbxl.new
+      book.add_sheet("First").append(["a"])
+      book.add_sheet("Second").append(["b"])
+      book.add_sheet("Third").append(["c"])
+      book.save(path)
+
+      loaded = Rbxl.open(path)
+      assert_equal "First", loaded.sheet(0).name
+      assert_equal "Third", loaded.sheet(-1).name
+      assert_equal "Second", loaded.sheet(1).name
+      assert_equal [["a"]], loaded.sheet(0).rows(values_only: true).to_a
+      loaded.close
+    end
+  end
+
+  def test_sheet_integer_index_out_of_range_raises
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "small.xlsx")
+
+      book = Rbxl.new
+      book.add_sheet("Only").append(["x"])
+      book.save(path)
+
+      loaded = Rbxl.open(path)
+      err = assert_raises(Rbxl::SheetNotFoundError) { loaded.sheet(3) }
+      assert_includes err.message, "out of range"
+      assert_includes err.message, "3"
+      loaded.close
+    end
+  end
+
   def test_missing_sheet_raises
     Dir.mktmpdir do |dir|
       path = File.join(dir, "book.xlsx")

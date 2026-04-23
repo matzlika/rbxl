@@ -94,18 +94,23 @@ module Rbxl
       @closed = false
     end
 
-    # Returns a row-by-row worksheet by visible sheet name.
+    # Returns a row-by-row worksheet by visible sheet name or by 0-based
+    # index into {#sheet_names}. Negative indexes count from the end, so
+    # <tt>sheet(-1)</tt> returns the last sheet.
     #
     # The returned object shares the workbook's ZIP handle. Closing the
     # workbook invalidates any worksheets produced by prior calls.
     #
-    # @param name [String] visible sheet name as listed in {#sheet_names}
+    # @param name_or_index [String, Integer] visible sheet name as listed in
+    #   {#sheet_names}, or an integer index into that list
     # @return [Rbxl::ReadOnlyWorksheet]
-    # @raise [Rbxl::SheetNotFoundError] if +name+ is not present
+    # @raise [Rbxl::SheetNotFoundError] if +name_or_index+ does not resolve
+    #   to a sheet
     # @raise [Rbxl::ClosedWorkbookError] if the workbook has been closed
-    def sheet(name)
+    def sheet(name_or_index)
       ensure_open!
 
+      name = resolve_sheet_name(name_or_index)
       entry_path = @sheet_entries.fetch(name) do
         raise SheetNotFoundError, "sheet not found: #{name}"
       end
@@ -142,6 +147,15 @@ module Rbxl
 
     def ensure_open!
       raise ClosedWorkbookError, "workbook has been closed" if closed?
+    end
+
+    def resolve_sheet_name(key)
+      return key unless key.is_a?(Integer)
+
+      name = @sheet_names[key]
+      return name if name
+
+      raise SheetNotFoundError, "sheet index out of range: #{key} (#{@sheet_names.length} sheet(s))"
     end
 
     def ensure_xlsx_format!(path)
