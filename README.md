@@ -25,6 +25,12 @@ Out of scope:
   read-only and generates new workbooks write-only, with no read-modify-save
   path. If you need to open a file, tweak a handful of cells, and write it
   back preserving everything else, use a full-object-model library instead.
+- legacy `.xls` (BIFF/CFB) input — rbxl reads OOXML `.xlsx` only. Convert
+  first, e.g. `libreoffice --headless --convert-to xlsx file.xls` or
+  `ssconvert file.xls file.xlsx` (Gnumeric). `Rbxl.open` detects the OLE
+  compound-file magic on open and raises `Rbxl::UnsupportedFormatError`
+  with the conversion hint rather than surfacing an opaque ZIP parse
+  error from rubyzip.
 - preserving arbitrary workbook structure on save
 - rich style round-tripping
 - formulas, images, charts, comments
@@ -140,6 +146,22 @@ mode), aligned to `max_column`:
 ```ruby
 book.sheet("Sparse").each_row(pad_cells: true, values_only: true).first
 # => ["left", nil, "right"]
+```
+
+**Leading empty columns aren't padded.** Both default and `pad_cells: true`
+rows align to the first populated column, not to column A. On a sheet
+whose dimension is `B1:N100`, every row has 13 entries (columns B–N), not
+14. `max_column` still reports `14` (column N, 1-based) — the gap is on
+the left, not the right. If you need column-A alignment, inspect
+`calculate_dimension` and prepend the missing `nil`s yourself:
+
+```ruby
+sheet = book.sheet("LeftOffset")
+sheet.calculate_dimension              # => "B1:N100"
+leading_pad = Array.new(1, nil)        # B starts at column 2, so 1 nil
+sheet.each_row(values_only: true, pad_cells: true) do |row|
+  aligned = leading_pad + row          # => [nil, "first B-value", ...]
+end
 ```
 
 **Expand merged cells.** Excel leaves the anchor cell populated and the
