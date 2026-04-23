@@ -92,6 +92,14 @@ module Rbxl
     # intent explicitly at the call site. Passing +read_only: false+ raises
     # {NotImplementedError}; a read/write mode is not available.
     #
+    # When a block is given, the workbook is yielded and automatically
+    # closed when the block returns (or raises), mirroring the +File.open+
+    # and +Zip::File.open+ idiom:
+    #
+    #   Rbxl.open("report.xlsx") do |book|
+    #     book.sheet("Report").each_row(values_only: true) { |row| p row }
+    #   end
+    #
     # With <tt>streaming: true</tt>, the native backend (when loaded) feeds
     # worksheet XML to the parser in chunks pulled from the ZIP input stream
     # instead of materializing the entire worksheet as one Ruby string. This
@@ -117,12 +125,15 @@ module Rbxl
     #   the native extension is not loaded.
     # @param date_conversion [Boolean] convert numeric cells backed by a
     #   date/time +numFmt+ to +Date+ / +Time+ / +DateTime+
-    # @return [Rbxl::ReadOnlyWorkbook]
+    # @yieldparam book [Rbxl::ReadOnlyWorkbook] opened workbook; auto-closed
+    #   when the block returns
+    # @return [Rbxl::ReadOnlyWorkbook, Object] the workbook when no block is
+    #   given, otherwise the block's return value
     # @raise [NotImplementedError] if +read_only+ is not +true+
-    def open(path, read_only: true, streaming: false, date_conversion: false)
+    def open(path, read_only: true, streaming: false, date_conversion: false, &block)
       raise NotImplementedError, "read/write mode is not supported; pass read_only: true" unless read_only
 
-      ReadOnlyWorkbook.open(path, streaming: streaming, date_conversion: date_conversion)
+      ReadOnlyWorkbook.open(path, streaming: streaming, date_conversion: date_conversion, &block)
     end
 
     # Creates a new workbook in write-only mode.

@@ -228,6 +228,59 @@ class RbxlTest < Minitest::Test
     loaded.close
   end
 
+  def test_open_with_block_yields_workbook_and_auto_closes
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "block.xlsx")
+
+      book = Rbxl.new
+      book.add_sheet("S") << ["ok"]
+      book.save(path)
+
+      captured = nil
+      Rbxl.open(path) do |loaded|
+        captured = loaded
+        refute loaded.closed?
+        assert_equal [["ok"]], loaded.sheet("S").rows(values_only: true).to_a
+      end
+
+      assert_instance_of Rbxl::ReadOnlyWorkbook, captured
+      assert captured.closed?
+    end
+  end
+
+  def test_open_with_block_closes_on_exception
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "block_raise.xlsx")
+
+      book = Rbxl.new
+      book.add_sheet("S") << ["ok"]
+      book.save(path)
+
+      captured = nil
+      assert_raises(RuntimeError) do
+        Rbxl.open(path) do |loaded|
+          captured = loaded
+          raise "boom"
+        end
+      end
+
+      assert captured.closed?
+    end
+  end
+
+  def test_open_with_block_returns_block_value
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "block_return.xlsx")
+
+      book = Rbxl.new
+      book.add_sheet("S") << ["ok"]
+      book.save(path)
+
+      result = Rbxl.open(path) { |loaded| loaded.sheet_names }
+      assert_equal ["S"], result
+    end
+  end
+
   def test_close_is_idempotent
     Dir.mktmpdir do |dir|
       path = File.join(dir, "report.xlsx")

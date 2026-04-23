@@ -6,6 +6,13 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [Unreleased]
 
+### Added
+
+- `Rbxl.open` (and `Rbxl::ReadOnlyWorkbook.open`) now accept a block. The
+  workbook is yielded and closed automatically when the block returns or
+  raises, matching the `File.open` / `Zip::File.open` idiom. Previously the
+  block was silently ignored.
+
 ## [1.2.0] - 2026-04-23
 
 ### Changed

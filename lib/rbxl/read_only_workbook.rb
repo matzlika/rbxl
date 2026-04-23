@@ -39,14 +39,28 @@ module Rbxl
     # Convenience constructor equivalent to
     # <tt>new(path, streaming:, date_conversion:)</tt>.
     #
+    # When a block is given, the workbook is yielded to the block and
+    # {#close} is called automatically when the block returns (or raises).
+    # The block's return value is returned to the caller, matching the
+    # +File.open+ / +Zip::File.open+ idiom.
+    #
     # @param path [String, #to_path] path to the <tt>.xlsx</tt> file
     # @param streaming [Boolean] feed worksheet XML to the native parser in
     #   chunks (see {Rbxl.open})
     # @param date_conversion [Boolean] convert numeric cells backed by a
     #   date/time +numFmt+ to Ruby date/time objects (see {Rbxl.open})
-    # @return [Rbxl::ReadOnlyWorkbook]
+    # @yieldparam book [Rbxl::ReadOnlyWorkbook] the opened workbook
+    # @return [Rbxl::ReadOnlyWorkbook, Object] the workbook when no block is
+    #   given, otherwise the block's return value
     def self.open(path, streaming: false, date_conversion: false)
-      new(path, streaming: streaming, date_conversion: date_conversion)
+      book = new(path, streaming: streaming, date_conversion: date_conversion)
+      return book unless block_given?
+
+      begin
+        yield book
+      ensure
+        book.close
+      end
     end
 
     # Opens the ZIP archive, pre-loads shared strings, and indexes the

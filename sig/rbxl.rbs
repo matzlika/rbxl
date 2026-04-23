@@ -10,6 +10,7 @@ module Rbxl
   type dimensions = { ref: String, max_col: Integer, max_row: Integer }
 
   def self.open: (pathish path, ?read_only: bool, ?streaming: bool, ?date_conversion: bool) -> ReadOnlyWorkbook
+               | [T] (pathish path, ?read_only: bool, ?streaming: bool, ?date_conversion: bool) { (ReadOnlyWorkbook) -> T } -> T
   def self.new: (?write_only: bool) -> WriteOnlyWorkbook
 
   attr_accessor self.max_shared_strings: Integer?
@@ -84,6 +85,7 @@ module Rbxl
     attr_reader sheet_names: Array[String]
 
     def self.open: (pathish path, ?streaming: bool, ?date_conversion: bool) -> ReadOnlyWorkbook
+                 | [T] (pathish path, ?streaming: bool, ?date_conversion: bool) { (ReadOnlyWorkbook) -> T } -> T
     def initialize: (pathish path, ?streaming: bool, ?date_conversion: bool) -> void
     def sheet: (String name) -> ReadOnlyWorksheet
     def close: () -> void
