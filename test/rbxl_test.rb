@@ -268,6 +268,29 @@ class RbxlTest < Minitest::Test
     end
   end
 
+  def test_open_rejects_legacy_xls_with_helpful_message
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "legacy.xls")
+      File.binwrite(path, "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1".b + ("\x00".b * 512))
+
+      err = assert_raises(Rbxl::UnsupportedFormatError) { Rbxl.open(path) }
+      assert_includes err.message, path
+      assert_includes err.message, "legacy .xls"
+      assert_includes err.message, "--convert-to xlsx"
+    end
+  end
+
+  def test_open_rejects_non_zip_with_helpful_message
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "garbage.xlsx")
+      File.binwrite(path, "not an xlsx at all")
+
+      err = assert_raises(Rbxl::UnsupportedFormatError) { Rbxl.open(path) }
+      assert_includes err.message, path
+      assert_includes err.message, "ZIP signature"
+    end
+  end
+
   def test_open_with_block_returns_block_value
     Dir.mktmpdir do |dir|
       path = File.join(dir, "block_return.xlsx")

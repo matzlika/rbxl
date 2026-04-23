@@ -30,6 +30,16 @@ module Rbxl
     # Namespace used by the OPC package relationships layer.
     PACKAGE_REL_NS = "http://schemas.openxmlformats.org/package/2006/relationships"
 
+    # First 8 bytes of the OLE Compound File Binary format (legacy .xls,
+    # .doc, .ppt). Sniffed to short-circuit into a typed error before
+    # rubyzip bubbles up an opaque "end of central directory" failure.
+    OLE_CFB_MAGIC = "\xD0\xCF\x11\xE0\xA1\xB1\x1A\xE1".b.freeze
+    private_constant :OLE_CFB_MAGIC
+
+    # ZIP local file header signature — the first bytes of every .xlsx.
+    ZIP_LOCAL_MAGIC = "PK\x03\x04".b.freeze
+    private_constant :ZIP_LOCAL_MAGIC
+
     # @return [String] filesystem path the workbook was opened from
     attr_reader :path
 
@@ -72,6 +82,7 @@ module Rbxl
     #   date-style lookup table to produced worksheets
     def initialize(path, streaming: false, date_conversion: false)
       @path = path
+      ensure_xlsx_format!(path)
       @zip = Zip::File.open(path)
       @streaming = streaming
       @date_conversion = date_conversion
@@ -131,6 +142,21 @@ module Rbxl
 
     def ensure_open!
       raise ClosedWorkbookError, "workbook has been closed" if closed?
+    end
+
+    def ensure_xlsx_format!(path)
+      header = File.binread(path, 8)
+      return if header.start_with?(ZIP_LOCAL_MAGIC)
+
+      if header.start_with?(OLE_CFB_MAGIC)
+        raise UnsupportedFormatError,
+              "#{path} looks like a legacy .xls (BIFF/CFB). " \
+              "rbxl supports .xlsx (OOXML) only; convert first, e.g. " \
+              "`libreoffice --headless --convert-to xlsx #{File.basename(path.to_s)}`."
+      end
+
+      raise UnsupportedFormatError,
+            "#{path} is not a valid .xlsx (no ZIP signature at offset 0)."
     end
 
     # Built-in numFmtId values that Excel resolves to date/time formats.

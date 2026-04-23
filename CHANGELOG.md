@@ -12,6 +12,10 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   workbook is yielded and closed automatically when the block returns or
   raises, matching the `File.open` / `Zip::File.open` idiom. Previously the
   block was silently ignored.
+- `Rbxl::UnsupportedFormatError` raised by `Rbxl.open` when the file is not
+  a `.xlsx` container. Legacy `.xls` (BIFF/CFB) inputs are detected by the
+  OLE compound-file magic and reported with a conversion hint, instead of
+  surfacing an opaque `Zip::Error` from rubyzip five frames deep.
 
 ## [1.2.0] - 2026-04-23
 

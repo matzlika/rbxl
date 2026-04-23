@@ -38,6 +38,9 @@ module Rbxl
   class WorksheetTooLargeError < Error
   end
 
+  class UnsupportedFormatError < Error
+  end
+
   class Cell
     attr_accessor value: cell_value
     attr_accessor coordinate: String?

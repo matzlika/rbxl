@@ -34,6 +34,12 @@ module Rbxl
   # worksheets are stopped mid-inflate rather than after the fact.
   class WorksheetTooLargeError < Error; end
 
+  # Raised by {Rbxl.open} when the file is not a valid +.xlsx+ container.
+  # Most commonly fires on legacy +.xls+ (BIFF/CFB) files — the message
+  # names the detected format and suggests a conversion path rather than
+  # letting the underlying ZIP parser surface an opaque error.
+  class UnsupportedFormatError < Error; end
+
   # Raised when workbook-level XML is malformed or internally inconsistent,
   # for example when +xl/workbook.xml+ cannot be parsed or references a
   # missing relationship target.
