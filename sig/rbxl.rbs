@@ -91,6 +91,8 @@ module Rbxl
                  | [T] (pathish path, ?streaming: bool, ?date_conversion: bool) { (ReadOnlyWorkbook) -> T } -> T
     def initialize: (pathish path, ?streaming: bool, ?date_conversion: bool) -> void
     def sheet: (String | Integer name_or_index) -> ReadOnlyWorksheet
+    def sheets: () { (ReadOnlyWorksheet) -> void } -> void
+              | () -> Enumerator[ReadOnlyWorksheet, void]
     def close: () -> void
     def closed?: () -> bool
   end

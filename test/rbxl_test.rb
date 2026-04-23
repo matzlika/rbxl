@@ -78,6 +78,43 @@ class RbxlTest < Minitest::Test
     end
   end
 
+  def test_sheets_iterates_in_workbook_order
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "multi.xlsx")
+
+      book = Rbxl.new
+      book.add_sheet("First").append(["a"])
+      book.add_sheet("Second").append(["b"])
+      book.add_sheet("Third").append(["c"])
+      book.save(path)
+
+      loaded = Rbxl.open(path)
+      assert_equal ["First", "Second", "Third"], loaded.sheets.map(&:name)
+      assert_equal "First", loaded.sheets.first.name
+      assert_equal [["b"]], loaded.sheets.to_a[1].rows(values_only: true).to_a
+
+      yielded = []
+      loaded.sheets { |s| yielded << s.name }
+      assert_equal ["First", "Second", "Third"], yielded
+
+      loaded.close
+    end
+  end
+
+  def test_sheets_raises_after_close
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "closed.xlsx")
+      book = Rbxl.new
+      book.add_sheet("Only").append(["x"])
+      book.save(path)
+
+      loaded = Rbxl.open(path)
+      loaded.close
+
+      assert_raises(Rbxl::ClosedWorkbookError) { loaded.sheets }
+    end
+  end
+
   def test_sheet_integer_index_out_of_range_raises
     Dir.mktmpdir do |dir|
       path = File.join(dir, "small.xlsx")

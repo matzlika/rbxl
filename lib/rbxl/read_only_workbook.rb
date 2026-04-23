@@ -127,6 +127,23 @@ module Rbxl
       )
     end
 
+    # Iterates the workbook's sheets in workbook order. Each worksheet is
+    # constructed on demand, so <tt>sheets.first</tt> allocates only the
+    # first sheet and <tt>sheets.lazy.find { ... }</tt> stops as soon as a
+    # match is found. Returned objects share the same ZIP handle and
+    # cached shared-strings / date-style tables as {#sheet}.
+    #
+    # @yieldparam worksheet [Rbxl::ReadOnlyWorksheet]
+    # @return [Enumerator<Rbxl::ReadOnlyWorksheet>] when no block is given
+    # @return [void] when a block is given
+    # @raise [Rbxl::ClosedWorkbookError] if the workbook has been closed
+    def sheets
+      ensure_open!
+      return enum_for(:sheets) unless block_given?
+
+      @sheet_names.each { |name| yield sheet(name) }
+    end
+
     # Releases the underlying ZIP file handle. Idempotent; subsequent calls
     # are no-ops.
     #

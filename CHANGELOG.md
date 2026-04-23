@@ -20,6 +20,11 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `sheet_names` (including negatives, so `sheet(-1)` returns the last
   sheet), for the common single-sheet case where `book.sheet(0)` reads
   cleaner than `book.sheet(book.sheet_names.first)`.
+- `Rbxl::ReadOnlyWorkbook#sheets` iterator over worksheets in workbook
+  order. Returns an `Enumerator` when called without a block, so
+  `book.sheets.first` and `book.sheets.map(&:name)` compose naturally.
+  Worksheet objects are constructed on demand — no eager parse of sibling
+  sheets.
 
 ## [1.2.0] - 2026-04-23
 
