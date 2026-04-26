@@ -13,9 +13,10 @@ module Rbxl
   #   sheet.append([1, "alice"])
   #   book.save("report.xlsx")
   #
-  # Style output is intentionally minimal: a single default style entry is
-  # emitted so that authored +style_id+ references resolve, but arbitrary
-  # workbook styling is out of scope for the MVP API.
+  # Cell styles can be registered up-front via {#add_style}; the returned
+  # +style_id+ is then attached to {Rbxl::WriteOnlyCell} instances. Workbooks
+  # that never call +add_style+ emit the same minimal +xl/styles.xml+ as
+  # earlier releases, byte-for-byte.
   class WriteOnlyWorkbook
     # @return [Array<Rbxl::WriteOnlyWorksheet>] worksheets in insertion order
     attr_reader :worksheets
@@ -25,6 +26,35 @@ module Rbxl
       @worksheets = []
       @closed = false
       @saved = false
+      @style_registry = StyleRegistry.new
+    end
+
+    # Registers a cell style and returns its +style_id+ for use on
+    # {Rbxl::WriteOnlyCell} instances.
+    #
+    #   header = book.add_style(
+    #     font: { name: "Yu Gothic UI", size: 11, bold: true, color: "333333" },
+    #     fill: { color: "EEEEEE" },
+    #   )
+    #   sheet << [Rbxl::WriteOnlyCell.new("Path", style_id: header)]
+    #
+    # Calls are not deduplicated by content: two equivalent registrations
+    # return distinct +style_id+ values. Callers wanting reuse should hold
+    # on to the integer themselves. Sub-tables (+fonts+, +fills+, +borders+,
+    # +numFmts+) are deduplicated internally to keep +styles.xml+ compact.
+    #
+    # @param font [Hash, nil] +name+, +size+, +bold+, +italic+, +underline+, +color+
+    # @param fill [Hash, nil] +color+ (RRGGBB hex) for solid fills, or +pattern_type+
+    # @param border [Hash, nil] +all+ for four-sided shorthand, or +top+/+right+/+bottom+/+left+
+    # @param alignment [Hash, nil] +horizontal+, +vertical+, +wrap_text+, +text_rotation+
+    # @param number_format [String, nil] Excel format code
+    # @return [Integer] 1-based style id
+    def add_style(font: nil, fill: nil, border: nil, alignment: nil, number_format: nil)
+      ensure_writable!
+
+      @style_registry.register(
+        Style.new(font: font, fill: fill, border: border, alignment: alignment, number_format: number_format)
+      )
     end
 
     # Creates and returns a new worksheet appended to this workbook.
@@ -159,6 +189,8 @@ module Rbxl
     end
 
     def styles_xml
+      return @style_registry.to_xml unless @style_registry.empty?
+
       <<~XML.chomp
         <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
         <styleSheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">

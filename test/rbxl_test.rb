@@ -621,6 +621,129 @@ class RbxlTest < Minitest::Test
     end
   end
 
+  def test_add_style_returns_sequential_one_based_ids
+    book = Rbxl.new
+    first = book.add_style(font: { bold: true })
+    second = book.add_style(font: { italic: true })
+    third = book.add_style(font: { bold: true })
+
+    assert_equal 1, first
+    assert_equal 2, second
+    assert_equal 3, third
+  end
+
+  def test_workbook_without_add_style_emits_unchanged_styles_xml
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "plain.xlsx")
+      book = Rbxl.new
+      book.add_sheet("S") << ["a"]
+      book.save(path)
+
+      styles = nil
+      Zip::File.open(path) do |zf|
+        styles = zf.read("xl/styles.xml")
+      end
+
+      assert_includes styles, '<fonts count="1">'
+      assert_includes styles, '<fills count="1">'
+      assert_includes styles, '<cellXfs count="1">'
+      refute_includes styles, "gray125"
+    end
+  end
+
+  def test_styles_xml_dedupes_fonts_across_styles
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "deduped.xlsx")
+      book = Rbxl.new
+      red = { name: "Calibri", color: "FF0000" }
+      blue = { name: "Calibri", color: "0000FF" }
+      book.add_style(font: red)
+      book.add_style(font: blue)
+      book.add_style(font: red)
+      book.add_sheet("S") << ["a"]
+      book.save(path)
+
+      styles = nil
+      Zip::File.open(path) do |zf|
+        styles = zf.read("xl/styles.xml")
+      end
+
+      # 1 default + 2 unique custom fonts = 3
+      assert_includes styles, '<fonts count="3">'
+      assert_includes styles, '<cellXfs count="4">'
+    end
+  end
+
+  def test_styles_xml_includes_gray125_when_custom_fill_present
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "filled.xlsx")
+      book = Rbxl.new
+      book.add_style(fill: { color: "EEEEEE" })
+      book.add_sheet("S") << ["a"]
+      book.save(path)
+
+      styles = nil
+      Zip::File.open(path) do |zf|
+        styles = zf.read("xl/styles.xml")
+      end
+
+      assert_includes styles, '<fills count="3">'
+      assert_includes styles, "gray125"
+      assert_includes styles, '<fgColor rgb="EEEEEE"/>'
+    end
+  end
+
+  def test_styled_workbook_round_trips_values
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "styled-rt.xlsx")
+      book = Rbxl.new
+      header = book.add_style(
+        font: { name: "Yu Gothic UI", size: 11, bold: true, color: "333333" },
+        fill: { color: "EEEEEE" },
+        alignment: { horizontal: "center" },
+      )
+      mono = book.add_style(font: { name: "Consolas", size: 11, color: "4A90D9" })
+      sheet = book.add_sheet("Report")
+      sheet << [Rbxl::WriteOnlyCell.new("Path", style_id: header), Rbxl::WriteOnlyCell.new("Description", style_id: header)]
+      sheet << [Rbxl::WriteOnlyCell.new("/bin/run.rb", style_id: mono), "entry point"]
+      book.save(path)
+
+      loaded = Rbxl.open(path)
+      values = loaded.sheet("Report").rows(values_only: true).to_a
+      assert_equal [["Path", "Description"], ["/bin/run.rb", "entry point"]], values
+      loaded.close
+    end
+  end
+
+  def test_add_style_after_save_raises
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "x.xlsx")
+      book = Rbxl.new
+      book.add_sheet("S") << ["a"]
+      book.save(path)
+
+      assert_raises(Rbxl::WorkbookAlreadySavedError) { book.add_style(font: { bold: true }) }
+    end
+  end
+
+  def test_add_style_with_number_format_allocates_custom_numfmt_id
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "nf.xlsx")
+      book = Rbxl.new
+      book.add_style(number_format: "#,##0")
+      book.add_sheet("S") << ["a"]
+      book.save(path)
+
+      styles = nil
+      Zip::File.open(path) do |zf|
+        styles = zf.read("xl/styles.xml")
+      end
+
+      assert_includes styles, '<numFmts count="1">'
+      assert_includes styles, '<numFmt numFmtId="164" formatCode="#,##0"/>'
+    end
+  end
+
   private
 
   def fixture_path(name)
