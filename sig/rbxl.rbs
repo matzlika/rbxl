@@ -9,8 +9,10 @@ module Rbxl
   type row_cells = Array[row_cell]
   type dimensions = { ref: String, max_col: Integer, max_row: Integer }
 
-  def self.open: (pathish path, ?read_only: bool, ?streaming: bool, ?date_conversion: bool) -> ReadOnlyWorkbook
-               | [T] (pathish path, ?read_only: bool, ?streaming: bool, ?date_conversion: bool) { (ReadOnlyWorkbook) -> T } -> T
+  type editable_cell_value = String | Integer | Float | bool | nil
+
+  def self.open: (pathish path, ?read_only: bool, ?edit: bool, ?streaming: bool, ?date_conversion: bool) -> (ReadOnlyWorkbook | EditableWorkbook)
+               | [T] (pathish path, ?read_only: bool, ?edit: bool, ?streaming: bool, ?date_conversion: bool) { (ReadOnlyWorkbook | EditableWorkbook) -> T } -> T
   def self.new: (?write_only: bool) -> WriteOnlyWorkbook
 
   attr_accessor self.max_shared_strings: Integer?
@@ -39,6 +41,18 @@ module Rbxl
   end
 
   class UnsupportedFormatError < Error
+  end
+
+  class WorkbookFormatError < Error
+  end
+
+  class WorksheetFormatError < Error
+  end
+
+  class CellValueError < WorksheetFormatError
+  end
+
+  class EditableCellTypeError < Error
   end
 
   class Cell
@@ -131,5 +145,52 @@ module Rbxl
     def <<: (row_input values) -> WriteOnlyWorksheet
     def append: (row_input values) -> WriteOnlyWorksheet
     def to_xml: () -> String
+  end
+
+  class EditableWorkbook
+    MAIN_NS: String
+    REL_NS: String
+    PACKAGE_REL_NS: String
+    OFFICE_DOC_REL_TYPE: String
+
+    attr_reader path: String
+    attr_reader sheet_names: Array[String]
+
+    def self.open: (pathish path) -> EditableWorkbook
+                 | [T] (pathish path) { (EditableWorkbook) -> T } -> T
+    def initialize: (pathish path) -> void
+    def sheet: (String | Integer name_or_index) -> EditableWorksheet
+    def sheets: () { (EditableWorksheet) -> void } -> void
+              | () -> Enumerator[EditableWorksheet, void]
+    def save: (?pathish? path) -> String
+    def close: () -> bool
+    def closed?: () -> bool
+  end
+
+  class EditableWorksheet
+    MAIN_NS: String
+
+    attr_reader name: String
+    attr_reader entry_path: String
+
+    def initialize: (zip: untyped, entry_path: String, workbook_path: String, shared_strings: Array[String], name: String) -> void
+    def cell: (String coordinate) -> EditableCell
+    def []: (String coordinate) -> EditableCell
+    def dirty?: () -> bool
+    def to_xml: () -> String
+  end
+
+  class EditableCell
+    MAIN_NS: String
+
+    attr_reader coordinate: String
+
+    def initialize: (worksheet: EditableWorksheet, coordinate: String) -> void
+    def value: () -> editable_cell_value
+    def value=: (editable_cell_value new_value) -> editable_cell_value
+  end
+
+  module SharedStringsLoader
+    def self.load: (untyped zip) -> Array[String]
   end
 end

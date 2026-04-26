@@ -4,6 +4,40 @@ All notable changes to this project are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Rbxl.open(path, edit: true)` opens a new `Rbxl::EditableWorkbook` for
+  surgical read-modify-save passes against an existing `.xlsx`. The design
+  promise is borrowed from rbpptx: parts you don't touch round-trip
+  byte-for-byte (`copy_raw_entry` straight from the source ZIP), and inside
+  a worksheet you do edit only the targeted `<c>` element is rewritten —
+  sibling cells, row attributes, `<mergeCells>`, `<conditionalFormatting>`,
+  `<dataValidations>`, comments, drawings, charts, pivot caches, and any
+  unknown OOXML extensions stay in place. The cell's `s` (style index)
+  attribute survives an overwrite so template number formats, fonts, and
+  fills carry through to the new value. Cells written by this mode become
+  inline strings (`t="inlineStr"`); `xl/sharedStrings.xml` is never
+  mutated, so the output is deterministic without a second SST pass.
+  Touched sheets are parsed as full Nokogiri DOMs, so this is the right
+  tool for template fill-ins — not for rewriting the data area of a large
+  worksheet (use `Rbxl.new` for that). `Rbxl::EditableCell#value=` accepts
+  `nil`, `String`, `Integer`, `Float`, and `true`/`false`; `Date`/`Time`
+  raise `Rbxl::EditableCellTypeError` so 1.4.0 doesn't ship a half-baked
+  numFmt write. New cells (and their enclosing rows) are inserted in
+  column- and row-sorted positions.
+- `Rbxl::EditableWorkbook#save` accepts no path to save in place,
+  rewriting the original via temp file plus atomic rename so a crash
+  mid-save never produces a half-written workbook.
+
+### Changed
+
+- Shared-strings parsing factored into `Rbxl::SharedStringsLoader` so the
+  read-only and editable workbooks share a single SST decoder rather than
+  carrying parallel copies. Behavior and limits (`Rbxl.max_shared_strings`,
+  `Rbxl.max_shared_string_bytes`) are unchanged.
+
 ## [1.3.0] - 2026-04-27
 
 ### Added

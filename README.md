@@ -2,11 +2,14 @@
 
 [![Gem Version](https://badge.fury.io/rb/rbxl.svg?icon=si%3Arubygems)](https://badge.fury.io/rb/rbxl)
 
-Fast, memory-friendly Ruby gem for row-by-row `.xlsx` reads and append-only writes.
+Fast, memory-friendly Ruby gem for row-by-row `.xlsx` reads, surgical edits
+of existing `.xlsx` files, and append-only writes.
 
-`rbxl` is built for the two workbook workflows that scale cleanly:
+`rbxl` is built for the three workbook workflows that scale cleanly:
 
 - read-only row-by-row iteration
+- read-modify-save surgical edits ("template fill-in") that round-trip
+  every untouched part byte-for-byte
 - write-only workbook generation
 
 The API is intentionally small and `openpyxl`-inspired, with an optional
@@ -16,30 +19,42 @@ Supported:
 
 - write-only workbook generation
 - read-only row-by-row iteration
+- read-modify-save surgical edits via `Rbxl.open(path, edit: true)` —
+  byte-for-byte preservation of untouched parts (styles, drawings, charts,
+  comments, pivot caches, custom XML, untouched sheets)
 - opt-in date/time conversion driven by the workbook's `numFmt` styles
 - optional C extension (`rbxl/native`) for maximum performance
 
 Out of scope:
 
-- in-place editing of an existing `.xlsx` file — rbxl opens workbooks
-  read-only and generates new workbooks write-only, with no read-modify-save
-  path. If you need to open a file, tweak a handful of cells, and write it
-  back preserving everything else, use a full-object-model library instead.
+- bulk rewrites of a worksheet's data area in edit mode — use the
+  write-only mode (`Rbxl.new`) for that. Edit mode is the right tool for
+  template fill-ins (a handful of cells in a templated workbook); the
+  touched sheet is loaded into a Nokogiri DOM, so memory scales with that
+  sheet's on-disk size
+- inserting / deleting / reordering / duplicating sheets
+- editing styles, formulas, named ranges, drawings, or shared strings
+- `Date` / `Time` / `DateTime` writes via edit mode (raise
+  `Rbxl::EditableCellTypeError`); convert to a numeric Excel serial
+  yourself if you need a date cell
 - legacy `.xls` (BIFF/CFB) input — rbxl reads OOXML `.xlsx` only. Convert
   first, e.g. `libreoffice --headless --convert-to xlsx file.xls` or
   `ssconvert file.xls file.xlsx` (Gnumeric). `Rbxl.open` detects the OLE
   compound-file magic on open and raises `Rbxl::UnsupportedFormatError`
   with the conversion hint rather than surfacing an opaque ZIP parse
   error from rubyzip.
-- preserving arbitrary workbook structure on save
-- rich style round-tripping
-- formulas, images, charts, comments
+- preserving arbitrary workbook structure on _write-only_ save (edit mode
+  preserves every untouched part)
+- rich style round-tripping when generating new workbooks
+- formulas, images, charts, comments — readable in edit mode, but not
+  introspected or edited
 
 ## Usage
 
-`Rbxl.open` defaults to read-only and `Rbxl.new` defaults to write-only;
-the `read_only:` / `write_only:` keywords remain for call-site clarity and
-to leave room for a future read/write mode.
+`Rbxl.open` defaults to read-only, `Rbxl.open(path, edit: true)` opens an
+existing workbook for surgical edits, and `Rbxl.new` defaults to
+write-only. The mode is selected by the wrapper at the module level so the
+call site doesn't have to juggle backend classes.
 
 ### Writing a new workbook
 
@@ -232,6 +247,83 @@ tokens. Whole-number serials return `Date`; fractional serials return
 default; leaving it off skips the styles parse entirely and keeps the
 native fast path in use. Turning it on routes reads through the pure-Ruby
 worksheet parser.
+
+### Editing an existing workbook
+
+Open a workbook in edit mode to surgically replace cell values without
+rebuilding the file from scratch. The classic use case is template
+fill-in: open a stylized template, write a handful of named cells, save
+back. Every part you don't touch — styles, drawings, charts, comments,
+pivot caches, custom XML, untouched worksheets — round-trips byte-for-byte
+straight from the source ZIP, so unknown OOXML extensions and
+PowerPoint-style add-ins survive the save.
+
+```ruby
+require "rbxl"
+
+Rbxl.open("template.xlsx", edit: true) do |book|
+  sheet = book.sheet("Invoice")
+  sheet["B2"].value = "Acme Inc."
+  sheet["B3"].value = Date.today.strftime("%Y-%m-%d")  # Strings are fine
+  sheet["E10"].value = 1_250.0                          # Numbers are fine
+  book.save("invoice-acme.xlsx")
+end
+```
+
+`book.save` with no argument overwrites the original file via temp file
+plus atomic rename, so a crash mid-save never produces a half-written
+workbook:
+
+```ruby
+Rbxl.open("template.xlsx", edit: true) do |book|
+  book.sheet(0)["A1"].value = "Q3 results"
+  book.save                # in-place, atomic
+end
+```
+
+Inside an edited worksheet, only the targeted `<c>` element is rewritten;
+sibling cells, the row's other attributes, `<mergeCells>`,
+`<conditionalFormatting>`, `<dataValidations>`, and any unknown OOXML
+extensions remain in place. The cell's `s` (style index) attribute is
+preserved when you overwrite an existing cell, so template formatting
+(number format, font, fill, alignment) carries through. New cells (and
+their enclosing rows) are inserted in column- and row-sorted positions.
+
+`EditableCell#value=` accepts:
+
+| Ruby                    | XLSX representation              |
+|-------------------------|----------------------------------|
+| `nil`                   | empty cell (preserves `s` style) |
+| `String`                | `t="inlineStr"` with `<is><t/>`  |
+| `Integer`, `Float`      | `<v>` numeric (no `t` attribute) |
+| `true`, `false`         | `t="b"` with `<v>1</v>`/`<v>0</v>` |
+| `Date`, `Time`          | raises `Rbxl::EditableCellTypeError` |
+
+Strings always round-trip as inline strings — `xl/sharedStrings.xml` is
+never mutated, so the SST entries that the cells you _didn't_ touch still
+reference stay byte-identical, and the touched cells get their text
+inlined. The trade-off is that overwriting a previously-shared-string
+cell leaves an orphaned SST entry; for template fill-ins that's
+negligible, and it's the simplest design that guarantees deterministic
+output.
+
+`Date`/`Time`/`DateTime` writes raise `Rbxl::EditableCellTypeError` in
+1.4.0 — the cell's `numFmt` style would also have to be the right
+date-pattern style for Excel to render the value, and silently picking
+one is the kind of magic this design promise is built to avoid. Convert
+to an Excel serial yourself if you need a date cell, and rely on the
+template's existing date-formatted style index to render it.
+
+#### Out of scope for edit mode
+
+- inserting / deleting / reordering / duplicating sheets
+- editing styles, formulas, named ranges, drawings, or shared strings
+- recomputing the worksheet `<dimension>` when a write expands the bounds
+  (Excel recomputes on open; openpyxl-style normalization may arrive in
+  a later release)
+- bulk rewrites of a worksheet's data area — touched sheets are loaded
+  into a Nokogiri DOM, so memory scales with that sheet's size on disk.
+  For data-area rewrites, use `Rbxl.new` instead.
 
 ## Native C Extension
 
