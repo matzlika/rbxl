@@ -97,7 +97,13 @@ module Rbxl
           write_entry(zip, "xl/styles.xml", styles_xml)
 
           worksheets.each_with_index do |sheet, index|
-            write_entry(zip, "xl/worksheets/sheet#{index + 1}.xml", sheet.to_xml)
+            sheet_index = index + 1
+            write_entry(zip, "xl/worksheets/sheet#{sheet_index}.xml", sheet.to_xml)
+
+            rels = sheet.external_hyperlink_relationships
+            unless rels.empty?
+              write_entry(zip, "xl/worksheets/_rels/sheet#{sheet_index}.xml.rels", sheet_rels_xml(rels))
+            end
           end
         end
       ensure
@@ -218,6 +224,17 @@ module Rbxl
 
     def escape(value)
       CGI.escapeHTML(value.to_s)
+    end
+
+    def sheet_rels_xml(rels)
+      buf = +'<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
+      buf << "\n"
+      buf << '<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">'
+      rels.each do |r|
+        buf << %(<Relationship Id="#{r[:rid]}" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink" Target="#{escape(r[:target])}" TargetMode="External"/>)
+      end
+      buf << '</Relationships>'
+      buf
     end
   end
 end

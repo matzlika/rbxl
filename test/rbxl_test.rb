@@ -976,6 +976,147 @@ class RbxlTest < Minitest::Test
     end
   end
 
+  def test_external_hyperlink_emits_rels_file_and_rId_reference
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "ext-link.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet << ["intro"]
+      sheet << [Rbxl::WriteOnlyCell.new("repo", hyperlink: "https://github.com/matzlika/rbxl")]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, 'xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships"'
+      assert_includes sheet_xml, '<hyperlinks>'
+      assert_includes sheet_xml, '<hyperlink ref="A2" r:id="rId1"/>'
+
+      rels = nil
+      Zip::File.open(path) { |zf| rels = zf.read("xl/worksheets/_rels/sheet1.xml.rels") }
+      assert_includes rels, 'Id="rId1"'
+      assert_includes rels, 'Target="https://github.com/matzlika/rbxl"'
+      assert_includes rels, 'TargetMode="External"'
+      assert_includes rels, "schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink"
+    end
+  end
+
+  def test_internal_hyperlink_uses_location_attribute_without_rels
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "int-link.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet << [Rbxl::WriteOnlyCell.new("see Detail", hyperlink: "#'Detail'!A1")]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, %(<hyperlink ref="A1" location="&apos;Detail&apos;!A1"/>).gsub("&apos;", "'") # accept either form below
+      refute_includes sheet_xml, 'r:id='
+
+      Zip::File.open(path) do |zf|
+        refute(zf.entries.any? { |e| e.name == "xl/worksheets/_rels/sheet1.xml.rels" },
+               "internal-only sheet should not have a rels file")
+      end
+    end
+  end
+
+  def test_internal_hyperlink_strips_leading_hash_from_location
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "int-link2.xlsx")
+      book = Rbxl.new
+      book.add_sheet("S") << [Rbxl::WriteOnlyCell.new("x", hyperlink: "#Sheet2!A1")]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<hyperlink ref="A1" location="Sheet2!A1"/>'
+    end
+  end
+
+  def test_mixed_hyperlinks_emit_both_external_and_internal_in_one_block
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "mixed.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet << [
+        Rbxl::WriteOnlyCell.new("ext", hyperlink: "https://example.com"),
+        Rbxl::WriteOnlyCell.new("int", hyperlink: "#Other!A1"),
+      ]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<hyperlink ref="A1" r:id="rId1"/>'
+      assert_includes sheet_xml, '<hyperlink ref="B1" location="Other!A1"/>'
+    end
+  end
+
+  def test_hyperlinks_block_appears_after_merge_cells
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "order.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.merge("A1:B1")
+      sheet << [Rbxl::WriteOnlyCell.new("link", hyperlink: "https://example.com")]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_match %r{</sheetData>.*<mergeCells .*?</mergeCells>.*<hyperlinks>.*</hyperlinks>}m, sheet_xml
+    end
+  end
+
+  def test_hyperlink_rId_namespace_is_per_sheet
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "two-sheets.xlsx")
+      book = Rbxl.new
+      a = book.add_sheet("A")
+      a << [Rbxl::WriteOnlyCell.new("first", hyperlink: "https://a.example.com")]
+      b = book.add_sheet("B")
+      b << [Rbxl::WriteOnlyCell.new("second", hyperlink: "https://b.example.com")]
+      book.save(path)
+
+      Zip::File.open(path) do |zf|
+        a_xml = zf.read("xl/worksheets/sheet1.xml")
+        b_xml = zf.read("xl/worksheets/sheet2.xml")
+        a_rels = zf.read("xl/worksheets/_rels/sheet1.xml.rels")
+        b_rels = zf.read("xl/worksheets/_rels/sheet2.xml.rels")
+
+        assert_includes a_xml, 'r:id="rId1"'
+        assert_includes b_xml, 'r:id="rId1"'
+        assert_includes a_rels, "a.example.com"
+        assert_includes b_rels, "b.example.com"
+      end
+    end
+  end
+
+  def test_no_hyperlinks_means_no_rels_file_and_no_xmlns_r
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "plain.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.column_width(0, 30)
+      sheet << ["a"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      refute_includes sheet_xml, "xmlns:r"
+      refute_includes sheet_xml, "<hyperlinks>"
+
+      Zip::File.open(path) do |zf|
+        refute(zf.entries.any? { |e| e.name.start_with?("xl/worksheets/_rels/") })
+      end
+    end
+  end
+
+  def test_external_hyperlink_target_is_xml_escaped_in_rels
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "escape.xlsx")
+      book = Rbxl.new
+      book.add_sheet("S") << [Rbxl::WriteOnlyCell.new("link", hyperlink: "https://example.com/?a=1&b=2")]
+      book.save(path)
+
+      rels = nil
+      Zip::File.open(path) { |zf| rels = zf.read("xl/worksheets/_rels/sheet1.xml.rels") }
+      assert_includes rels, "a=1&amp;b=2"
+    end
+  end
+
   private
 
   def fixture_path(name)

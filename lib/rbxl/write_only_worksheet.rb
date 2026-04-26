@@ -192,7 +192,7 @@ module Rbxl
     #
     # @return [String] worksheet XML
     def to_xml
-      if column_meta_empty? && defined?(Rbxl::Native)
+      if wrap_features_empty? && defined?(Rbxl::Native)
         return Rbxl::Native.generate_sheet(@rows, formatted_row_heights)
       end
 
@@ -200,7 +200,11 @@ module Rbxl
       buf = +""
       buf << '<?xml version="1.0" encoding="UTF-8" standalone="yes"?>'
       buf << "\n"
-      buf << '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      if external_hyperlinks?
+        buf << '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">'
+      else
+        buf << '<worksheet xmlns="http://schemas.openxmlformats.org/spreadsheetml/2006/main">'
+      end
       buf << "\n"
       buf << '  <dimension ref="'
       buf << dimension_ref
@@ -229,14 +233,73 @@ module Rbxl
 
       buf << '</sheetData>'
       append_merge_cells_to(buf) unless @merges.empty?
+      append_hyperlinks_to(buf) if hyperlinks.any?
       buf << "\n</worksheet>"
       buf
     end
 
+    # @return [Array<Hash>] hyperlinks in row-then-column order. Each entry has
+    #   +:ref+ (Excel coordinate), +:target+ (URL or anchor without leading #),
+    #   +:external+ (true/false), and +:rid+ (only set when external).
+    #   Lazily computed on first access; assumes +@rows+ is stable by then.
+    def hyperlinks
+      @hyperlinks ||= compute_hyperlinks
+    end
+
+    # @return [Array<Hash{Symbol=>String}>] {rid:, target:} pairs for external
+    #   hyperlinks; empty array when the sheet has no external links.
+    def external_hyperlink_relationships
+      hyperlinks.select { |h| h[:external] }.map { |h| { rid: h[:rid], target: h[:target] } }
+    end
+
     private
 
-    def column_meta_empty?
-      @column_widths.empty? && @freeze.nil? && @merges.empty?
+    def wrap_features_empty?
+      @column_widths.empty? && @freeze.nil? && @merges.empty? && hyperlinks.empty?
+    end
+
+    def external_hyperlinks?
+      hyperlinks.any? { |h| h[:external] }
+    end
+
+    def compute_hyperlinks
+      out = []
+      rid_counter = 0
+      @rows.each_with_index do |row, row_index|
+        row.each_with_index do |cell, col_index|
+          next unless cell.is_a?(WriteOnlyCell) && cell.hyperlink
+
+          ref = "#{column_name(col_index + 1)}#{row_index + 1}"
+          target = cell.hyperlink
+
+          if target.start_with?("#")
+            out << { ref: ref, target: target[1..], external: false }
+          else
+            rid_counter += 1
+            out << { ref: ref, target: target, external: true, rid: "rId#{rid_counter}" }
+          end
+        end
+      end
+      out
+    end
+
+    def append_hyperlinks_to(buf)
+      buf << '<hyperlinks>'
+      hyperlinks.each do |h|
+        buf << %(<hyperlink ref="#{h[:ref]}")
+        if h[:external]
+          buf << %( r:id="#{h[:rid]}")
+        else
+          buf << %( location="#{escape_attr(h[:target])}")
+        end
+        buf << '/>'
+      end
+      buf << '</hyperlinks>'
+    end
+
+    def escape_attr(value)
+      str = value.to_s
+      str.gsub(/[&<>"]/) { |c| { '&' => '&amp;', '<' => '&lt;', '>' => '&gt;', '"' => '&quot;' }[c] }
     end
 
     def formatted_row_heights
