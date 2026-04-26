@@ -883,6 +883,99 @@ class RbxlTest < Minitest::Test
     end
   end
 
+  def test_row_height_emits_ht_and_custom_height_attribute
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "rh.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.row_height(0, 22)
+      sheet << ["header"]
+      sheet << ["body"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<row r="1" ht="22" customHeight="1">'
+      assert_includes sheet_xml, '<row r="2">'
+    end
+  end
+
+  def test_row_height_with_range_applies_to_each_row
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "rh-range.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.row_height(0..2, 18.5)
+      4.times { |i| sheet << ["row#{i}"] }
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<row r="1" ht="18.5" customHeight="1">'
+      assert_includes sheet_xml, '<row r="2" ht="18.5" customHeight="1">'
+      assert_includes sheet_xml, '<row r="3" ht="18.5" customHeight="1">'
+      assert_includes sheet_xml, '<row r="4">'
+    end
+  end
+
+  def test_row_height_unmatched_index_does_not_emit
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "rh-future.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.row_height(99, 30)
+      sheet << ["only one row"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<row r="1">'
+      refute_includes sheet_xml, "ht="
+      refute_includes sheet_xml, "customHeight"
+    end
+  end
+
+  def test_row_height_rejects_invalid_arguments
+    book = Rbxl.new
+    sheet = book.add_sheet("S")
+
+    assert_raises(ArgumentError) { sheet.row_height(-1, 20) }
+    assert_raises(ArgumentError) { sheet.row_height(0, 0) }
+    assert_raises(ArgumentError) { sheet.row_height(2..1, 20) }
+    assert_raises(TypeError) { sheet.row_height("1", 20) }
+  end
+
+  def test_row_height_works_with_native_fast_path
+    skip "native extension not loaded" unless defined?(Rbxl::Native)
+
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "rh-native.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.row_height(0, 22)
+      sheet << ["a"]
+      sheet << ["b"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<row r="1" ht="22" customHeight="1">'
+    end
+  end
+
+  def test_row_height_combined_with_column_width_uses_ruby_path
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "rh-combined.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.row_height(0, 22)
+      sheet.column_width(0, 30)
+      sheet << ["a"]
+      sheet << ["b"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<col min="1" max="1" width="30" customWidth="1"/>'
+      assert_includes sheet_xml, '<row r="1" ht="22" customHeight="1">'
+    end
+  end
+
   private
 
   def fixture_path(name)

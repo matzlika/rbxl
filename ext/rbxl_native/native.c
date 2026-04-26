@@ -720,14 +720,23 @@ static void write_cell(dynbuf *buf, int col, int row, VALUE value, VALUE cWriteO
 }
 
 /*
- * Rbxl::Native.generate_sheet(rows) → XML string
+ * Rbxl::Native.generate_sheet(rows, row_heights = nil) → XML string
  *
  * rows: Array of Arrays, each inner array is a row of cell values
+ * row_heights: optional Hash<Integer, String> mapping 0-based row index to a
+ *              pre-formatted height string. When present, the corresponding
+ *              <row> element gets ht="..." customHeight="1" attributes.
  */
-static VALUE rb_native_generate(VALUE self, VALUE rows)
+static VALUE rb_native_generate(int argc, VALUE *argv, VALUE self)
 {
     (void)self;
+    VALUE rows, row_heights;
+    rb_scan_args(argc, argv, "11", &rows, &row_heights);
+
     Check_Type(rows, T_ARRAY);
+    if (!NIL_P(row_heights)) {
+        Check_Type(row_heights, T_HASH);
+    }
 
     VALUE mRbxl = rb_const_get(rb_cObject, rb_intern("Rbxl"));
     VALUE cWriteOnlyCell = rb_const_get(mRbxl, rb_intern("WriteOnlyCell"));
@@ -762,7 +771,19 @@ static VALUE rb_native_generate(VALUE self, VALUE rows)
 
         W("<row r=\"");
         write_int(&buf, row_num);
-        W("\">");
+        W("\"");
+
+        if (!NIL_P(row_heights)) {
+            VALUE height_str = rb_hash_lookup(row_heights, LONG2FIX(i));
+            if (!NIL_P(height_str)) {
+                Check_Type(height_str, T_STRING);
+                W(" ht=\"");
+                dynbuf_append(&buf, RSTRING_PTR(height_str), RSTRING_LEN(height_str));
+                W("\" customHeight=\"1\"");
+            }
+        }
+
+        W(">");
 
         for (long j = 0; j < ncols; j++) {
             write_cell(&buf, (int)(j + 1), (int)row_num, rb_ary_entry(row, j), cWriteOnlyCell);
@@ -793,5 +814,5 @@ void Init_rbxl_native(void)
     rb_define_module_function(mNative, "parse_sheet_full", rb_native_parse_full, 2);
     rb_define_module_function(mNative, "parse_sheet_io", rb_native_parse_io, 3);
     rb_define_module_function(mNative, "parse_sheet_full_io", rb_native_parse_full_io, 3);
-    rb_define_module_function(mNative, "generate_sheet", rb_native_generate, 1);
+    rb_define_module_function(mNative, "generate_sheet", rb_native_generate, -1);
 }

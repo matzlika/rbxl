@@ -26,6 +26,7 @@ module Rbxl
       @rows = []
       @column_name_cache = []
       @column_widths = {}
+      @row_heights = {}
       @freeze = nil
       @merges = []
     end
@@ -60,6 +61,43 @@ module Rbxl
         raise ArgumentError, "column range must be ascending (got #{index_or_range})" if first > last
 
         index_or_range.each { |i| @column_widths[i] = width }
+      else
+        raise TypeError, "expected Integer or Range, got #{index_or_range.class}"
+      end
+
+      self
+    end
+
+    # Sets the height of one or more rows.
+    #
+    #   sheet.row_height(0, 22)          # row 1 (header)
+    #   sheet.row_height(0..2, 18)       # rows 1-3
+    #
+    # The argument is a 0-based row index or an ascending Range. Indexes
+    # may target rows that have not yet been appended; the height is
+    # applied if and when a matching row is emitted at save time.
+    #
+    # @param index_or_range [Integer, Range<Integer>] 0-based row index or Range
+    # @param height [Numeric] row height in points
+    # @return [Rbxl::WriteOnlyWorksheet] +self+ for chaining
+    # @raise [ArgumentError] if the index is negative or the height is not positive
+    # @raise [TypeError] if the first argument is neither Integer nor Range
+    def row_height(index_or_range, height)
+      height = Float(height)
+      raise ArgumentError, "row height must be positive (got #{height})" unless height.positive?
+
+      case index_or_range
+      when Integer
+        raise ArgumentError, "row index must be non-negative (got #{index_or_range})" if index_or_range.negative?
+
+        @row_heights[index_or_range] = height
+      when Range
+        first = index_or_range.first
+        last = index_or_range.last
+        raise ArgumentError, "row range must not be negative (got #{index_or_range})" if first.negative?
+        raise ArgumentError, "row range must be ascending (got #{index_or_range})" if first > last
+
+        index_or_range.each { |i| @row_heights[i] = height }
       else
         raise TypeError, "expected Integer or Range, got #{index_or_range.class}"
       end
@@ -154,8 +192,8 @@ module Rbxl
     #
     # @return [String] worksheet XML
     def to_xml
-      if meta_empty? && defined?(Rbxl::Native)
-        return Rbxl::Native.generate_sheet(@rows)
+      if column_meta_empty? && defined?(Rbxl::Native)
+        return Rbxl::Native.generate_sheet(@rows, formatted_row_heights)
       end
 
       dimension_ref = @rows.empty? ? "A1" : "A1:#{column_name(max_columns)}#{@rows.length}"
@@ -178,7 +216,11 @@ module Rbxl
         row_num_str = (row_index + 1).to_s
         buf << '<row r="'
         buf << row_num_str
-        buf << '">'
+        buf << '"'
+        if (height = @row_heights[row_index])
+          buf << %( ht="#{format_number(height)}" customHeight="1")
+        end
+        buf << '>'
         row_values.each_with_index do |value, col_index|
           serialize_cell_to(buf, column_name(col_index + 1), row_num_str, value)
         end
@@ -193,8 +235,18 @@ module Rbxl
 
     private
 
-    def meta_empty?
+    def column_meta_empty?
       @column_widths.empty? && @freeze.nil? && @merges.empty?
+    end
+
+    def formatted_row_heights
+      return nil if @row_heights.empty?
+
+      @row_heights.each_with_object({}) { |(idx, h), out| out[idx] = format_number(h) }
+    end
+
+    def format_number(n)
+      n == n.to_i ? n.to_i.to_s : n.to_s
     end
 
     def append_sheet_views_to(buf)
@@ -231,7 +283,7 @@ module Rbxl
           end_idx = sorted[j][0]
           j += 1
         end
-        buf << %(<col min="#{start_idx + 1}" max="#{end_idx + 1}" width="#{format_width(width)}" customWidth="1"/>)
+        buf << %(<col min="#{start_idx + 1}" max="#{end_idx + 1}" width="#{format_number(width)}" customWidth="1"/>)
         i = j
       end
       buf << '</cols>'
@@ -242,10 +294,6 @@ module Rbxl
       buf << %(<mergeCells count="#{@merges.length}">)
       @merges.each { |range| buf << %(<mergeCell ref="#{range}"/>) }
       buf << '</mergeCells>'
-    end
-
-    def format_width(width)
-      width == width.to_i ? width.to_i.to_s : width.to_s
     end
 
     def serialize_cell_to(buf, col_name, row_num_str, value)
