@@ -744,10 +744,153 @@ class RbxlTest < Minitest::Test
     end
   end
 
+  def test_column_width_emits_cols_block
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "cols.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.column_width(0, 45.7)
+      sheet.column_width(1, 60.0)
+      sheet << ["a", "b"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<col min="1" max="1" width="45.7" customWidth="1"/>'
+      assert_includes sheet_xml, '<col min="2" max="2" width="60" customWidth="1"/>'
+    end
+  end
+
+  def test_column_width_with_range_merges_consecutive_same_widths
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "cols-range.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.column_width(1..3, 12)
+      sheet << ["a", "b", "c", "d"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<col min="2" max="4" width="12" customWidth="1"/>'
+    end
+  end
+
+  def test_column_width_rejects_invalid_arguments
+    book = Rbxl.new
+    sheet = book.add_sheet("S")
+
+    assert_raises(ArgumentError) { sheet.column_width(-1, 10) }
+    assert_raises(ArgumentError) { sheet.column_width(0, 0) }
+    assert_raises(ArgumentError) { sheet.column_width(0, -1) }
+    assert_raises(ArgumentError) { sheet.column_width(2..1, 10) }
+    assert_raises(TypeError) { sheet.column_width("A", 10) }
+  end
+
+  def test_freeze_emits_pane_with_top_left_and_active_pane
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "freeze.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.freeze!(rows: 1, cols: 2)
+      sheet << ["a", "b", "c"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<sheetViews>'
+      assert_includes sheet_xml, '<pane xSplit="2" ySplit="1" topLeftCell="C2" activePane="bottomRight" state="frozen"/>'
+    end
+  end
+
+  def test_freeze_with_only_rows_uses_bottom_left_active_pane
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "freeze-row.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.freeze!(rows: 1)
+      sheet << ["a"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_includes sheet_xml, '<pane ySplit="1" topLeftCell="A2" activePane="bottomLeft" state="frozen"/>'
+    end
+  end
+
+  def test_freeze_clears_when_both_zero
+    book = Rbxl.new
+    sheet = book.add_sheet("S")
+    sheet.freeze!(rows: 1)
+    sheet.freeze!(rows: 0, cols: 0)
+    sheet << ["a"]
+
+    refute_includes sheet.send(:to_xml), '<sheetViews>'
+  end
+
+  def test_merge_emits_merge_cells_after_sheet_data
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "merge.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("S")
+      sheet.merge("A1:C1")
+      sheet.merge("A2", "B2")
+      sheet << ["heading"]
+      sheet << ["sub"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      assert_match %r{</sheetData>.*<mergeCells count="2">.*<mergeCell ref="A1:C1"/>.*<mergeCell ref="A2:B2"/>.*</mergeCells>}m, sheet_xml
+    end
+  end
+
+  def test_merge_rejects_bad_arguments
+    book = Rbxl.new
+    sheet = book.add_sheet("S")
+
+    assert_raises(ArgumentError) { sheet.merge }
+    assert_raises(ArgumentError) { sheet.merge(:not_a_string) }
+    assert_raises(ArgumentError) { sheet.merge("A1", "B1", "C1") }
+  end
+
+  def test_worksheet_without_meta_features_emits_unchanged_xml
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "plain-sheet.xlsx")
+      book = Rbxl.new
+      book.add_sheet("S") << ["a", "b"]
+      book.save(path)
+
+      sheet_xml = read_sheet_xml(path)
+      refute_includes sheet_xml, '<cols>'
+      refute_includes sheet_xml, '<sheetViews>'
+      refute_includes sheet_xml, '<mergeCells'
+    end
+  end
+
+  def test_meta_features_round_trip_through_read_only
+    Dir.mktmpdir do |dir|
+      path = File.join(dir, "round.xlsx")
+      book = Rbxl.new
+      sheet = book.add_sheet("Report")
+      sheet.column_width(0, 30)
+      sheet.column_width(1, 50)
+      sheet.freeze!(rows: 1)
+      sheet.merge("A1:B1")
+      sheet << ["title"]
+      sheet << ["a", "b"]
+      book.save(path)
+
+      loaded = Rbxl.open(path)
+      values = loaded.sheet("Report").rows(values_only: true).to_a
+      assert_equal [["title"], ["a", "b"]], values
+      loaded.close
+    end
+  end
+
   private
 
   def fixture_path(name)
     File.join(__dir__, "fixtures", name)
+  end
+
+  def read_sheet_xml(path, sheet_index: 1)
+    Zip::File.open(path) { |zf| zf.read("xl/worksheets/sheet#{sheet_index}.xml") }
   end
 
   def write_minimal_workbook(path, sheet_body, styles: nil, workbook_pr: nil)
