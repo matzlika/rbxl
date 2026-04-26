@@ -9,7 +9,7 @@ Gem::Specification.new do |spec|
   spec.description = "rbxl is a fast, low-memory Ruby gem for row-by-row XLSX reads and append-only XLSX writes, with an optional native extension for higher-throughput XML parsing."
   spec.homepage = "https://github.com/matzlika/rbxl"
   spec.license = "MIT"
-  spec.required_ruby_version = ">= 3.1"
+  spec.required_ruby_version = ">= 3.2"
   spec.metadata = {
     "homepage_uri" => spec.homepage,
     "source_code_uri" => "https://github.com/matzlika/rbxl",
