@@ -8,9 +8,13 @@ require "zip"
 require_relative "rbxl/cell"
 require_relative "rbxl/empty_cell"
 require_relative "rbxl/errors"
+require_relative "rbxl/shared_strings_loader"
 require_relative "rbxl/read_only_cell"
 require_relative "rbxl/read_only_workbook"
 require_relative "rbxl/read_only_worksheet"
+require_relative "rbxl/editable_cell"
+require_relative "rbxl/editable_worksheet"
+require_relative "rbxl/editable_workbook"
 require_relative "rbxl/row"
 require_relative "rbxl/version"
 require_relative "rbxl/write_only_cell"
@@ -19,9 +23,13 @@ require_relative "rbxl/write_only_worksheet"
 
 # Minimal, memory-friendly XLSX reader/writer inspired by +openpyxl+.
 #
-# Rbxl exposes two explicit, non-overlapping modes:
+# Rbxl exposes three explicit, non-overlapping modes, each picked up by
+# {Rbxl.open} / {Rbxl.new}:
 #
 # * {Rbxl.open} returns a {Rbxl::ReadOnlyWorkbook} for row-by-row reads
+# * {Rbxl.open} with <tt>edit: true</tt> returns a {Rbxl::EditableWorkbook}
+#   for surgical read-modify-save passes that round-trip every untouched
+#   part byte-for-byte
 # * {Rbxl.new} returns a {Rbxl::WriteOnlyWorkbook} for one-shot writes
 #
 # The API is intentionally narrow so that memory usage stays predictable
@@ -86,11 +94,19 @@ module Rbxl
     # @return [Integer, nil] per-worksheet streaming byte cap
     attr_accessor :max_worksheet_bytes
 
-    # Opens an existing workbook in read-only row-by-row mode.
+    # Opens an existing workbook.
+    #
+    # By default opens in read-only row-by-row mode and returns a
+    # {Rbxl::ReadOnlyWorkbook}. Pass <tt>edit: true</tt> to open in
+    # read-modify-save mode and receive a {Rbxl::EditableWorkbook} instead.
+    # The two modes are wired up here at the module level so call sites pick
+    # a mode by keyword without juggling backend classes directly.
     #
     # The +read_only+ keyword defaults to +true+ and exists to mark the
-    # intent explicitly at the call site. Passing +read_only: false+ raises
-    # {NotImplementedError}; a read/write mode is not available.
+    # intent explicitly at the call site. Passing +read_only: false+ without
+    # also passing +edit: true+ raises {NotImplementedError} — there is no
+    # promiscuous read/write mode that mixes streaming reads with surgical
+    # writes.
     #
     # When a block is given, the workbook is yielded and automatically
     # closed when the block returns (or raises), mirroring the +File.open+
@@ -98,6 +114,11 @@ module Rbxl
     #
     #   Rbxl.open("report.xlsx") do |book|
     #     book.sheet("Report").each_row(values_only: true) { |row| p row }
+    #   end
+    #
+    #   Rbxl.open("template.xlsx", edit: true) do |book|
+    #     book.sheet("Sheet1")["B5"].value = "Acme Inc."
+    #     book.save
     #   end
     #
     # With <tt>streaming: true</tt>, the native backend (when loaded) feeds
@@ -118,20 +139,39 @@ module Rbxl
     # disables the native fast path and routes reads through the Ruby
     # worksheet parser.
     #
+    # +streaming:+ and +date_conversion:+ are read-mode options and are
+    # rejected when paired with +edit: true+, since the editable backend
+    # does not run worksheets through the streaming parser.
+    #
     # @param path [String, #to_path] filesystem path to an <tt>.xlsx</tt> file
-    # @param read_only [Boolean] retained for call-site clarity; must be +true+
+    # @param read_only [Boolean] retained for call-site clarity; must be
+    #   +true+ unless +edit: true+ is also passed
+    # @param edit [Boolean] open in read-modify-save mode; returns an
+    #   {Rbxl::EditableWorkbook}
     # @param streaming [Boolean] feed worksheet XML to the native parser in
     #   chunks instead of fully inflating the entry in advance. Ignored when
     #   the native extension is not loaded.
     # @param date_conversion [Boolean] convert numeric cells backed by a
     #   date/time +numFmt+ to +Date+ / +Time+ / +DateTime+
-    # @yieldparam book [Rbxl::ReadOnlyWorkbook] opened workbook; auto-closed
-    #   when the block returns
-    # @return [Rbxl::ReadOnlyWorkbook, Object] the workbook when no block is
-    #   given, otherwise the block's return value
-    # @raise [NotImplementedError] if +read_only+ is not +true+
-    def open(path, read_only: true, streaming: false, date_conversion: false, &block)
-      raise NotImplementedError, "read/write mode is not supported; pass read_only: true" unless read_only
+    # @yieldparam book [Rbxl::ReadOnlyWorkbook, Rbxl::EditableWorkbook]
+    #   opened workbook; auto-closed when the block returns
+    # @return [Rbxl::ReadOnlyWorkbook, Rbxl::EditableWorkbook, Object] the
+    #   workbook when no block is given, otherwise the block's return value
+    # @raise [NotImplementedError] if +read_only+ is +false+ without
+    #   +edit: true+
+    # @raise [ArgumentError] if +edit: true+ is paired with read-only options
+    def open(path, read_only: true, edit: false, streaming: false, date_conversion: false, &block)
+      if edit
+        if streaming || date_conversion
+          raise ArgumentError,
+                "edit: true is incompatible with streaming:/date_conversion:; " \
+                "those options apply to the read-only mode"
+        end
+
+        return EditableWorkbook.open(path, &block)
+      end
+
+      raise NotImplementedError, "read/write mode is not supported; pass read_only: true or edit: true" unless read_only
 
       ReadOnlyWorkbook.open(path, streaming: streaming, date_conversion: date_conversion, &block)
     end
