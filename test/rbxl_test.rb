@@ -628,7 +628,7 @@ class RbxlTest < Minitest::Test
   end
 
   def write_minimal_workbook(path, sheet_body, styles: nil, workbook_pr: nil)
-    Zip::File.open(path, Zip::File::CREATE) do |zf|
+    Zip::File.open(path, create: true) do |zf|
       zf.get_output_stream("[Content_Types].xml") do |s|
         s.write <<~XML
           <?xml version="1.0" encoding="UTF-8" standalone="yes"?>

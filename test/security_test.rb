@@ -16,7 +16,7 @@ class SecurityTest < Minitest::Test
   def with_shared_strings_xlsx(shared_strings_xml)
     Dir.mktmpdir do |dir|
       path = File.join(dir, "attack.xlsx")
-      Zip::File.open(path, Zip::File::CREATE) do |zip|
+      Zip::File.open(path, create: true) do |zip|
         zip.get_output_stream("xl/sharedStrings.xml") { |f| f.write(shared_strings_xml) }
       end
       yield path

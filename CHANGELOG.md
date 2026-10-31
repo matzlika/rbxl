@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-10-31
+
+### Changed
+
+- The `rubyzip` dependency is widened from `~> 2.3` to `>= 2.4, < 4`, so
+  rbxl now installs alongside rubyzip 3.x. The floor moves to 2.4, the
+  first release accepting the `create:` keyword that 3.x requires. No
+  library code changes were needed; the test suite passes against both
+  rubyzip 2.4 and 3.x.
+
 ## [1.4.0] - 2026-05-01
 
 ### Added

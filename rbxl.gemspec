@@ -21,6 +21,6 @@ Gem::Specification.new do |spec|
   spec.require_paths = ["lib"]
   spec.extensions = ["ext/rbxl_native/extconf.rb"]
 
-  spec.add_dependency "rubyzip", "~> 2.3"
+  spec.add_dependency "rubyzip", ">= 2.4", "< 4"
   spec.add_dependency "nokogiri", ">= 1.19", "< 2.0"
 end
