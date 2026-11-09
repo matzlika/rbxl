@@ -4,6 +4,36 @@ All notable changes to this project are documented here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and this project
 follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [Unreleased]
+
+### Added
+
+- `Rbxl::WriteOnlyWorkbook#add_style` registers a workbook-level cell style
+  (font, fill, border, alignment, number_format) and returns a `style_id`
+  that can be attached to `Rbxl::WriteOnlyCell` instances. Workbooks that
+  never call `add_style` emit the same minimal `xl/styles.xml` as before,
+  byte-for-byte.
+- `Rbxl::WriteOnlyWorksheet#column_width` accepts an integer index or a
+  Range plus a width; consecutive same-width columns merge into one
+  `<col>` element on save.
+- `Rbxl::WriteOnlyWorksheet#row_height` accepts an integer index or a
+  Range plus a height. Native fast path supports row heights via an
+  optional second argument to `Rbxl::Native.generate_sheet`, so heights
+  ride the C path instead of forcing a Ruby fallback.
+- `Rbxl::WriteOnlyWorksheet#freeze!` emits a `<sheetView>` `<pane>` with
+  `topLeftCell`, `activePane`, and `state="frozen"` derived from `rows:`
+  and `cols:` keyword arguments.
+- `Rbxl::WriteOnlyWorksheet#merge` records merge ranges (either as
+  `"A1:C1"` or as `"A1", "C1"`) and emits them in a `<mergeCells>` block
+  after `</sheetData>`.
+- `Rbxl::WriteOnlyCell` now accepts a `hyperlink:` keyword. Strings
+  starting with `#` are emitted as internal sheet anchors via the
+  `<hyperlink location="..."/>` form; everything else becomes an
+  external URL with a per-sheet
+  `xl/worksheets/_rels/sheetN.xml.rels` entry referenced through
+  `r:id`. The `xmlns:r` namespace declaration is added to `<worksheet>`
+  only when external links exist.
+
 ## [1.5.0] - 2026-10-31
 
 ### Changed

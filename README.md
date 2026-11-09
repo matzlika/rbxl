@@ -17,7 +17,9 @@ native extension for faster XML parsing when you need more throughput.
 
 Supported:
 
-- write-only workbook generation
+- write-only workbook generation with **registered cell styles** (font,
+  fill, border, alignment, number format), per-column widths, per-row
+  heights, freeze panes, merged cells, and hyperlinks
 - read-only row-by-row iteration
 - read-modify-save surgical edits via `Rbxl.open(path, edit: true)` —
   byte-for-byte preservation of untouched parts (styles, drawings, charts,
@@ -34,6 +36,8 @@ Out of scope:
   sheet's on-disk size
 - inserting / deleting / reordering / duplicating sheets
 - editing styles, formulas, named ranges, drawings, or shared strings
+  through the **edit mode** path (write-only mode supports cell styles via
+  `add_style`)
 - `Date` / `Time` / `DateTime` writes via edit mode (raise
   `Rbxl::EditableCellTypeError`); convert to a numeric Excel serial
   yourself if you need a date cell
@@ -45,7 +49,6 @@ Out of scope:
   error from rubyzip.
 - preserving arbitrary workbook structure on _write-only_ save (edit mode
   preserves every untouched part)
-- rich style round-tripping when generating new workbooks
 - formulas, images, charts, comments — readable in edit mode, but not
   introspected or edited
 
@@ -83,6 +86,72 @@ Write-only workbooks follow three rules:
 
 This is the tradeoff that keeps memory flat: rbxl buffers rows per sheet
 and never materializes a full workbook object graph.
+
+#### Styled cells, column widths, row heights, freeze, merge, hyperlinks
+
+Cell formatting and worksheet metadata are registered up-front so the
+write path stays append-only. Styles are attached to individual cells
+through `Rbxl::WriteOnlyCell`; widths, heights, freeze, and merges are
+sheet-level calls that ride the same one-shot save:
+
+```ruby
+require "rbxl"
+
+book = Rbxl.new
+
+header = book.add_style(
+  font: { name: "Yu Gothic UI", size: 11, bold: true, color: "333333" },
+  fill: { color: "EEEEEE" },
+  alignment: { horizontal: "center" },
+)
+mono = book.add_style(font: { name: "Consolas", size: 11, color: "4A90D9" })
+link_style = book.add_style(font: { color: "0563C1", underline: true })
+
+sheet = book.add_sheet("Report")
+sheet.column_width(0, 45.7)
+sheet.column_width(1, 60)
+sheet.row_height(0, 22)
+sheet.freeze!(rows: 1)
+sheet.merge("A1:B1")
+
+sheet << [Rbxl::WriteOnlyCell.new("Path", style_id: header),
+          Rbxl::WriteOnlyCell.new("Description", style_id: header)]
+sheet << [Rbxl::WriteOnlyCell.new("/bin/run.rb", style_id: mono),
+          "entry point"]
+sheet << [Rbxl::WriteOnlyCell.new(
+            "see Detail",
+            style_id: link_style,
+            hyperlink: "#'Detail'!A1",
+          ),
+          Rbxl::WriteOnlyCell.new(
+            "repo",
+            style_id: link_style,
+            hyperlink: "https://github.com/matzlika/rbxl",
+          )]
+
+book.save("report.xlsx")
+```
+
+`add_style` accepts five keyword arguments — `font:`, `fill:`, `border:`,
+`alignment:`, `number_format:` — each as a hash:
+
+| Component         | Keys                                                            |
+|-------------------|-----------------------------------------------------------------|
+| `font:`           | `name`, `size`, `bold`, `italic`, `underline`, `color` (RRGGBB) |
+| `fill:`           | `color` (solid pattern), or `pattern_type`                      |
+| `border:`         | `all: { style:, color: }`, or per-side `top:` / `right:` / `bottom:` / `left:` |
+| `alignment:`      | `horizontal`, `vertical`, `wrap_text`, `text_rotation`          |
+| `number_format:`  | Excel format code string (e.g. `"#,##0"`, `"yyyy-mm-dd"`)       |
+
+Two equivalent registrations return distinct `style_id`s — internal
+sub-tables (`fonts`, `fills`, `borders`, `numFmts`) are still
+deduplicated by content so `xl/styles.xml` stays compact.
+
+Hyperlink targets starting with `#` are emitted as internal sheet
+anchors (no `_rels` entry needed); other strings become external URLs
+with a per-sheet `xl/worksheets/_rels/sheetN.xml.rels` entry. Sheets
+that don't use any of these features keep the existing native fast
+path with byte-identical output.
 
 ### Reading a workbook
 
