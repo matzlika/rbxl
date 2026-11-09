@@ -191,13 +191,8 @@ module Rbxl
     end
 
     # Built-in numFmtId values that Excel resolves to date/time formats.
-    # Ids outside this set are dates only when the workbook provides a
-    # matching custom +<numFmt>+ entry whose format code contains date
-    # tokens. See ECMA-376 part 1 §18.8.30.
-    BUILTIN_DATE_FMT_IDS = Set.new([14, 15, 16, 17, 18, 19, 20, 21, 22,
-                                    27, 28, 29, 30, 31, 32, 33, 34, 35, 36,
-                                    45, 46, 47, 50, 51, 52, 53, 54, 55, 56,
-                                    57, 58]).freeze
+    # Kept for backward compatibility; see {Rbxl::DateFormat::BUILTIN_IDS}.
+    BUILTIN_DATE_FMT_IDS = DateFormat::BUILTIN_IDS
 
     def date_styles
       return nil unless @date_conversion
@@ -245,15 +240,8 @@ module Rbxl
       date_styles.freeze
     end
 
-    # Quoted literals, bracketed directives (e.g. [Red], [$-409]), and
-    # backslash-escaped characters never introduce date tokens, so strip
-    # them before looking for +y/m/d/h/s+.
     def date_format_code?(code)
-      stripped = code.dup
-      stripped.gsub!(/\[[^\]]*\]/, "")
-      stripped.gsub!(/"[^"]*"/, "")
-      stripped.gsub!(/\\./, "")
-      stripped.match?(/[ymdhs]/i)
+      DateFormat.date_format_code?(code)
     end
 
     def load_sheet_entries

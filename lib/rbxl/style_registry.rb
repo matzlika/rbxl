@@ -150,87 +150,10 @@ module Rbxl
       buf << '</cellXfs>'
     end
 
-    def render_font(font)
-      attrs = +'<font>'
-      attrs << '<b val="1"/>' if font[:bold]
-      attrs << '<i val="1"/>' if font[:italic]
-      attrs << '<u/>' if font[:underline]
-      attrs << %(<sz val="#{font[:size]}"/>) if font[:size]
-      attrs << %(<color rgb="#{escape_attr(font[:color].to_s.upcase)}"/>) if font[:color]
-      attrs << %(<name val="#{escape_attr(font[:name])}"/>) if font[:name]
-      attrs << '</font>'
-      attrs
-    end
-
-    def render_fill(fill)
-      pattern = fill[:pattern_type] || (fill[:color] ? 'solid' : 'none')
-      buf = +'<fill><patternFill patternType="'
-      buf << pattern
-      buf << '"'
-      if fill[:color] && pattern != 'none'
-        buf << '><fgColor rgb="'
-        buf << escape_attr(fill[:color].to_s.upcase)
-        buf << '"/></patternFill></fill>'
-      else
-        buf << '/></fill>'
-      end
-      buf
-    end
-
-    def render_border(border)
-      buf = +'<border>'
-      %i[left right top bottom].each do |side|
-        spec = border[side]
-        if spec
-          buf << %(<#{side} style="#{escape_attr(spec[:style] || 'thin')}">)
-          if spec[:color]
-            buf << %(<color rgb="#{escape_attr(spec[:color].to_s.upcase)}"/>)
-          end
-          buf << %(</#{side}>)
-        else
-          buf << %(<#{side}/>)
-        end
-      end
-      buf << '<diagonal/></border>'
-      buf
-    end
-
-    def render_xf(xf)
-      attrs = +'<xf'
-      attrs << %( numFmtId="#{xf[:numfmt_id]}")
-      attrs << %( fontId="#{xf[:font_id]}")
-      attrs << %( fillId="#{xf[:fill_id]}")
-      attrs << %( borderId="#{xf[:border_id]}")
-      attrs << ' xfId="0"'
-      attrs << ' applyFont="1"' if xf[:font_id].positive?
-      attrs << ' applyFill="1"' if xf[:fill_id].positive?
-      attrs << ' applyBorder="1"' if xf[:border_id].positive?
-      attrs << ' applyNumberFormat="1"' if xf[:numfmt_id].positive?
-      attrs << ' applyAlignment="1"' if xf[:alignment]
-
-      if xf[:alignment]
-        attrs << '>'
-        attrs << render_alignment(xf[:alignment])
-        attrs << '</xf>'
-      else
-        attrs << '/>'
-      end
-      attrs
-    end
-
-    def render_alignment(alignment)
-      buf = +'<alignment'
-      buf << %( horizontal="#{escape_attr(alignment[:horizontal])}") if alignment[:horizontal]
-      buf << %( vertical="#{escape_attr(alignment[:vertical])}") if alignment[:vertical]
-      buf << ' wrapText="1"' if alignment[:wrap_text]
-      buf << %( textRotation="#{alignment[:text_rotation].to_i}") if alignment[:text_rotation]
-      buf << '/>'
-      buf
-    end
-
-    def escape_attr(value)
-      str = value.to_s
-      str.gsub(/[&<>"]/) { |c| { '&' => '&amp;', '<' => '&lt;', '>' => '&gt;', '"' => '&quot;' }[c] }
-    end
+    def render_font(font) = StyleXml.render_font(font)
+    def render_fill(fill) = StyleXml.render_fill(fill)
+    def render_border(border) = StyleXml.render_border(border)
+    def render_xf(xf) = StyleXml.render_xf(xf)
+    def escape_attr(value) = StyleXml.escape_attr(value)
   end
 end

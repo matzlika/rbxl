@@ -33,6 +33,59 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
   `xl/worksheets/_rels/sheetN.xml.rels` entry referenced through
   `r:id`. The `xmlns:r` namespace declaration is added to `<worksheet>`
   only when external links exist.
+- Edit mode (`Rbxl.open(path, edit: true)`) grows the pieces a template
+  fill-in needs:
+  - `EditableCell#value=` accepts `Date`, `Time`, and `DateTime`. Values
+    are written as Excel serials honoring the workbook's 1900/1904 date
+    system. A cell that already has a date format keeps it; otherwise a
+    copy of the cell's current style with the built-in short-date (14) or
+    date-time (22) format is derived, so template fonts and borders stay.
+  - `EditableCell#style(font:, fill:, border:, alignment:, number_format:)`
+    changes part of a cell's current style — font and alignment
+    attributes and border sides merge, fill and number format replace.
+    `EditableWorkbook#add_style` registers a complete style (same keywords
+    as write-only mode) for `EditableCell#style_id=`; `#style_id` reads
+    the current index. New entries are only appended to `xl/styles.xml`,
+    so existing style indices never change, and the part is rewritten
+    only when a style was added.
+  - `EditableWorksheet#write_rows(anchor, rows)` writes a 2D array into
+    consecutive cells. Given a range such as `"B10:D19"`, data that does
+    not fit raises before any cell is touched.
+  - `EditableWorkbook#defined_name(name, sheet: nil)` returns the cell a
+    single-cell defined name points to; `#defined_names` lists them.
+    Raises the new `Rbxl::DefinedNameError` for unknown, ambiguous, or
+    range names.
+  - `EditableWorkbook#add_sheet(name)` appends an empty worksheet (part,
+    workbook relationship, and content-type override).
+  - `EditableWorkbook#save(path = nil, recalc: true)`: when cells were
+    edited, `<calcPr fullCalcOnLoad="1"/>` is set so Excel and
+    LibreOffice recompute stale template formulas on open. If an edit
+    replaced a formula, `xl/calcChain.xml` is dropped so Excel rebuilds
+    it.
+
+### Changed
+
+- Style colors (`font:` / `fill:` / `border:` `color`) are written as
+  8-digit ARGB (`FFRRGGBB`), the form ECMA-376 specifies. A leading `#`
+  is accepted; 8-digit input passes through.
+- The `rubyzip` dependency now allows 3.x (`>= 2.3, < 4`). The suite
+  passes on rubyzip 2.4.1 and 3.7.0.
+- Edit mode no longer raises `Rbxl::EditableCellTypeError` for
+  `Date`/`Time`/`DateTime` (see above). Editing a cell now also touches
+  `xl/workbook.xml` (the recalculation flag) unless `recalc: false`.
+
+### Fixed
+
+- Edit mode: saving to another path, editing more, and saving again no
+  longer drops the first round of edits.
+- Edit mode: after an in-place `save`, opening a sheet that had not been
+  loaded yet no longer reads from the replaced file's stale ZIP
+  directory (it raised `WorksheetFormatError`).
+- Edit mode: rows and cells inserted into a part that binds SpreadsheetML
+  under a prefix (e.g. `x:` from the .NET OpenXML SDK) now get that
+  namespace instead of none.
+- Edit mode: re-serialized parts keep their original layout; libxml2 no
+  longer re-indents them.
 
 ## [1.5.0] - 2026-10-31
 

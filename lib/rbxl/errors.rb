@@ -54,8 +54,11 @@ module Rbxl
   class CellValueError < WorksheetFormatError; end
 
   # Raised by {Rbxl::EditableCell#value=} when the assigned Ruby object is
-  # not one of the supported types (+nil+, +String+, +Integer+, +Float+,
-  # +true+, +false+). +Date+/+Time+ values raise this error too — see
-  # {Rbxl::EditableCell} for the rationale.
+  # not one of the supported types (+nil+, +String+, +Numeric+, +true+,
+  # +false+, +Date+, +Time+, +DateTime+).
   class EditableCellTypeError < Error; end
+
+  # Raised by {Rbxl::EditableWorkbook#defined_name} when the name does not
+  # exist, is ambiguous, or does not refer to a single cell.
+  class DefinedNameError < Error; end
 end

@@ -11,6 +11,9 @@ module Rbxl
   #   sheet["B5"].value = "company name"
   #   sheet.cell("B5").value      # => "company name"
   #
+  # Table-shaped regions (invoice line items, report rows) can be filled in
+  # one call with {#write_rows}.
+  #
   # See {EditableWorkbook} for the design contract these edits live inside.
   class EditableWorksheet
     # Namespace for the main SpreadsheetML schema.
@@ -22,21 +25,81 @@ module Rbxl
     # @return [String] ZIP entry path of the worksheet's XML part
     attr_reader :entry_path
 
+    # Largest column index Excel accepts (+XFD+).
+    MAX_COLUMN = 16_384
+
+    # Largest row number Excel accepts.
+    MAX_ROW = 1_048_576
+
+    # @api private
+    # Construct via {EditableWorkbook#sheet} / {EditableWorkbook#add_sheet}.
+    #
+    # @param workbook [Rbxl::EditableWorkbook] owning workbook
     # @param zip [Zip::File] open archive shared with the workbook
     # @param entry_path [String] ZIP entry path for this sheet's XML
     # @param workbook_path [String] filesystem path the workbook was opened from
     # @param shared_strings [Array<String>] pre-decoded shared strings table
     # @param name [String] visible sheet name
-    def initialize(zip:, entry_path:, workbook_path:, shared_strings:, name:)
+    # @param source_xml [String, nil] initial XML for a sheet that does not
+    #   exist in the source ZIP yet (see {EditableWorkbook#add_sheet})
+    def initialize(workbook:, zip:, entry_path:, workbook_path:, shared_strings:, name:, source_xml: nil)
+      @workbook = workbook
       @zip = zip
       @entry_path = entry_path
       @workbook_path = workbook_path
       @shared_strings = shared_strings
       @name = name
+      @source_xml = source_xml
       @doc = nil
       @sheet_data = nil
       @row_index = nil
       @dirty = false
+      @modified = !source_xml.nil?
+      @formula_removed = false
+    end
+
+    # Writes a 2D array of values into consecutive cells, top-left first.
+    # Each value goes through {EditableCell#value=}, so the template's
+    # per-cell styles are kept and +Date+ / +Time+ get date formatting.
+    # +nil+ entries clear the corresponding cell.
+    #
+    # Pass a range (e.g. <tt>"B10:D19"</tt>) instead of a single anchor to
+    # declare the template's capacity: writing more rows or wider rows than
+    # the range holds raises before any cell is touched. Rows are never
+    # inserted — growing a table past the template's prepared rows is out
+    # of scope.
+    #
+    #   sheet.write_rows("B10:D19", [
+    #     ["作業費", 1, 50_000],
+    #     ["交通費", 1,  3_200],
+    #   ])
+    #
+    # @param anchor [String] top-left coordinate, or an +A1:B2+-style range
+    # @param rows [Array<Array>] row-major values
+    # @return [Rbxl::EditableWorksheet] +self+
+    # @raise [ArgumentError] if the data does not fit the range or the sheet
+    def write_rows(anchor, rows)
+      raise ArgumentError, "rows must be an Array of Arrays" unless rows.is_a?(Array) && rows.all? { |r| r.is_a?(Array) }
+
+      start_col, start_row, max_rows, max_cols = parse_anchor(anchor)
+      width = rows.map(&:length).max || 0
+
+      if max_rows && rows.length > max_rows
+        raise ArgumentError, "#{rows.length} rows do not fit #{anchor} (#{max_rows} rows)"
+      end
+      if max_cols && width > max_cols
+        raise ArgumentError, "a #{width}-column row does not fit #{anchor} (#{max_cols} columns)"
+      end
+      if start_row + rows.length - 1 > MAX_ROW || start_col + width - 1 > MAX_COLUMN
+        raise ArgumentError, "data starting at #{anchor} extends past the sheet's bounds"
+      end
+
+      rows.each_with_index do |values, r|
+        values.each_with_index do |value, c|
+          cell("#{column_label(start_col + c)}#{start_row + r}").value = value
+        end
+      end
+      self
     end
 
     # Returns the {EditableCell} view for +coordinate+. Cells not present in
@@ -67,6 +130,42 @@ module Rbxl
     # @api private
     def mark_dirty!
       @dirty = true
+      @modified = true
+    end
+
+    # @api private
+    # Whether the in-memory XML differs from the source ZIP. Unlike {#dirty?}
+    # this survives {EditableWorkbook#save}: the source ZIP is never
+    # rewritten, so every later save must keep emitting the edited XML.
+    def modified?
+      @modified
+    end
+
+    # @api private
+    def note_formula_removed!
+      @formula_removed = true
+    end
+
+    # @api private
+    def formula_removed?
+      @formula_removed
+    end
+
+    # @api private
+    # Points lazy loads at a freshly reopened archive (after an in-place
+    # save replaced the file the old handle was reading by name).
+    def rebind_zip!(zip)
+      @zip = zip
+    end
+
+    # @api private
+    def styles
+      @workbook.styles
+    end
+
+    # @api private
+    def date_1904?
+      @workbook.date_1904?
     end
 
     # @api private
@@ -78,7 +177,7 @@ module Rbxl
     #   The XML declaration and original namespace bindings are preserved.
     def to_xml
       ensure_doc_loaded!
-      @doc.to_xml
+      XmlEdit.serialize(@doc)
     end
 
     # @api private
@@ -122,13 +221,7 @@ module Rbxl
     def ensure_doc_loaded!
       return if @doc
 
-      entry = @zip.find_entry(@entry_path)
-      unless entry
-        raise WorksheetFormatError,
-              "worksheet #{@name.inspect} is missing XML entry #{@entry_path.inspect} in #{@workbook_path}"
-      end
-
-      parsed = Nokogiri::XML(entry.get_input_stream.read)
+      parsed = Nokogiri::XML(@source_xml || read_entry)
       unless parsed.errors.empty?
         raise WorksheetFormatError,
               "invalid worksheet XML for sheet #{@name.inspect} in #{@workbook_path}: #{parsed.errors.first}"
@@ -146,6 +239,16 @@ module Rbxl
         idx = row["r"]&.to_i
         h[idx] = row if idx
       end
+    end
+
+    def read_entry
+      entry = @zip.find_entry(@entry_path)
+      unless entry
+        raise WorksheetFormatError,
+              "worksheet #{@name.inspect} is missing XML entry #{@entry_path.inspect} in #{@workbook_path}"
+      end
+
+      entry.get_input_stream.read
     end
 
     def find_or_create_row(row_num, create:)
@@ -166,8 +269,7 @@ module Rbxl
         child.name == "row" && (child["r"]&.to_i || 0) > row_num
       end
       xml = %(<row r="#{row_num}"/>)
-      added = following ? following.add_previous_sibling(xml) : parent.add_child(xml)
-      first_node(added)
+      following ? XmlEdit.insert_before(following, xml) : XmlEdit.append(parent, xml)
     end
 
     def insert_cell_in_order(parent, coordinate, col_index)
@@ -178,12 +280,7 @@ module Rbxl
         child_col && child_col > col_index
       end
       xml = %(<c r="#{coordinate}"/>)
-      added = following ? following.add_previous_sibling(xml) : parent.add_child(xml)
-      first_node(added)
-    end
-
-    def first_node(result)
-      result.is_a?(Nokogiri::XML::NodeSet) ? result.first : result
+      following ? XmlEdit.insert_before(following, xml) : XmlEdit.append(parent, xml)
     end
 
     COORDINATE_RE = /\A([A-Z]+)([1-9]\d*)\z/.freeze
@@ -205,6 +302,35 @@ module Rbxl
       return [nil, nil] unless m
 
       [column_index(m[1]), m[2].to_i]
+    end
+
+    RANGE_RE = /\A([A-Z]+)([1-9]\d*)(?::([A-Z]+)([1-9]\d*))?\z/.freeze
+    private_constant :RANGE_RE
+
+    # @return [Array(Integer, Integer, Integer|nil, Integer|nil)]
+    #   start column, start row, and the range's row / column capacity
+    def parse_anchor(anchor)
+      m = anchor.to_s.upcase.match(RANGE_RE)
+      raise ArgumentError, "invalid anchor: #{anchor.inspect}" unless m
+
+      col1 = column_index(m[1])
+      row1 = m[2].to_i
+      return [col1, row1, nil, nil] unless m[3]
+
+      col2 = column_index(m[3])
+      row2 = m[4].to_i
+      raise ArgumentError, "range must run top-left to bottom-right: #{anchor.inspect}" if col2 < col1 || row2 < row1
+
+      [col1, row1, row2 - row1 + 1, col2 - col1 + 1]
+    end
+
+    def column_label(index)
+      label = +""
+      while index.positive?
+        index, rem = (index - 1).divmod(26)
+        label.prepend((65 + rem).chr)
+      end
+      label
     end
 
     def column_index(label)

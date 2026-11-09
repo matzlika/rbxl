@@ -22,8 +22,11 @@ Supported:
   heights, freeze panes, merged cells, and hyperlinks
 - read-only row-by-row iteration
 - read-modify-save surgical edits via `Rbxl.open(path, edit: true)` —
-  byte-for-byte preservation of untouched parts (styles, drawings, charts,
-  comments, pivot caches, custom XML, untouched sheets)
+  byte-for-byte preservation of untouched parts (drawings, charts,
+  comments, pivot caches, custom XML, untouched sheets). Built for
+  template fill-in: dates, bulk `write_rows`, defined-name lookup,
+  partial restyling on top of the template's formatting, and appending
+  new sheets
 - opt-in date/time conversion driven by the workbook's `numFmt` styles
 - optional C extension (`rbxl/native`) for maximum performance
 
@@ -34,13 +37,13 @@ Out of scope:
   template fill-ins (a handful of cells in a templated workbook); the
   touched sheet is loaded into a Nokogiri DOM, so memory scales with that
   sheet's on-disk size
-- inserting / deleting / reordering / duplicating sheets
-- editing styles, formulas, named ranges, drawings, or shared strings
-  through the **edit mode** path (write-only mode supports cell styles via
-  `add_style`)
-- `Date` / `Time` / `DateTime` writes via edit mode (raise
-  `Rbxl::EditableCellTypeError`); convert to a numeric Excel serial
-  yourself if you need a date cell
+- inserting / deleting rows or columns in edit mode (shifting every
+  reference — formulas, merges, conditional formats, defined names,
+  charts — is a different class of tool)
+- deleting / renaming / reordering / duplicating sheets in edit mode
+  (`add_sheet` appends a new empty sheet)
+- editing formulas, defined names, drawings, or shared strings through
+  the edit mode path
 - legacy `.xls` (BIFF/CFB) input — rbxl reads OOXML `.xlsx` only. Convert
   first, e.g. `libreoffice --headless --convert-to xlsx file.xls` or
   `ssconvert file.xls file.xlsx` (Gnumeric). `Rbxl.open` detects the OLE
@@ -137,7 +140,7 @@ book.save("report.xlsx")
 
 | Component         | Keys                                                            |
 |-------------------|-----------------------------------------------------------------|
-| `font:`           | `name`, `size`, `bold`, `italic`, `underline`, `color` (RRGGBB) |
+| `font:`           | `name`, `size`, `bold`, `italic`, `underline`, `color` (RRGGBB, written as ARGB `FFRRGGBB`) |
 | `fill:`           | `color` (solid pattern), or `pattern_type`                      |
 | `border:`         | `all: { style:, color: }`, or per-side `top:` / `right:` / `bottom:` / `left:` |
 | `alignment:`      | `horizontal`, `vertical`, `wrap_text`, `text_rotation`          |
@@ -319,29 +322,51 @@ worksheet parser.
 
 ### Editing an existing workbook
 
-Open a workbook in edit mode to surgically replace cell values without
-rebuilding the file from scratch. The classic use case is template
-fill-in: open a stylized template, write a handful of named cells, save
-back. Every part you don't touch — styles, drawings, charts, comments,
-pivot caches, custom XML, untouched worksheets — round-trips byte-for-byte
-straight from the source ZIP, so unknown OOXML extensions and
-PowerPoint-style add-ins survive the save.
+Open a workbook in edit mode to fill in a template without rebuilding it
+from scratch: open a formatted template, write the cells that change,
+save. Every part you don't touch — drawings, charts, comments, pivot
+caches, custom XML, untouched worksheets — round-trips byte-for-byte
+straight from the source ZIP, so unknown OOXML extensions and add-ins
+survive the save.
 
 ```ruby
 require "rbxl"
 
-Rbxl.open("template.xlsx", edit: true) do |book|
-  sheet = book.sheet("Invoice")
-  sheet["B2"].value = "Acme Inc."
-  sheet["B3"].value = Date.today.strftime("%Y-%m-%d")  # Strings are fine
-  sheet["E10"].value = 1_250.0                          # Numbers are fine
+Rbxl.open("invoice-template.xlsx", edit: true) do |book|
+  sheet = book.sheet("請求書")
+
+  # Plain values keep the template cell's formatting.
+  sheet["B3"].value = "株式会社Acme 御中"
+
+  # Dates are written as Excel serials. A cell that already has a date
+  # format keeps it; otherwise the built-in short-date format is layered
+  # on top of the cell's current style (fonts / borders survive).
+  sheet["F2"].value = Date.today
+
+  # Line items: consecutive cells from a top-left anchor. With a range,
+  # data that doesn't fit the template's prepared rows raises up front.
+  sheet.write_rows("B10:D19", [
+    ["作業費", 1, 50_000],
+    ["交通費", 1,  3_200],
+  ])
+
+  # Partial restyle: only what you pass changes.
+  sheet["F20"].style(font: { color: "C00000", bold: true })
+
+  # Fill by defined name ("名前付きセル") instead of coordinate.
+  book.defined_name("顧客名").value = "株式会社Acme"
+
+  # Append a new, empty sheet.
+  book.add_sheet("明細データ").write_rows("A1", [["品目", "金額"]])
+
   book.save("invoice-acme.xlsx")
 end
 ```
 
 `book.save` with no argument overwrites the original file via temp file
 plus atomic rename, so a crash mid-save never produces a half-written
-workbook:
+workbook. The workbook stays usable after `save`; later edits and saves
+include everything edited so far.
 
 ```ruby
 Rbxl.open("template.xlsx", edit: true) do |book|
@@ -353,20 +378,27 @@ end
 Inside an edited worksheet, only the targeted `<c>` element is rewritten;
 sibling cells, the row's other attributes, `<mergeCells>`,
 `<conditionalFormatting>`, `<dataValidations>`, and any unknown OOXML
-extensions remain in place. The cell's `s` (style index) attribute is
-preserved when you overwrite an existing cell, so template formatting
-(number format, font, fill, alignment) carries through. New cells (and
-their enclosing rows) are inserted in column- and row-sorted positions.
+extensions remain in place, and the part keeps its original layout (no
+re-indentation). The cell's `s` (style index) attribute is preserved
+when you overwrite an existing cell, so template formatting carries
+through. New cells (and their enclosing rows) are inserted in column- and
+row-sorted positions, in whatever namespace prefix the part uses.
 
 `EditableCell#value=` accepts:
 
-| Ruby                    | XLSX representation              |
-|-------------------------|----------------------------------|
-| `nil`                   | empty cell (preserves `s` style) |
-| `String`                | `t="inlineStr"` with `<is><t/>`  |
-| `Integer`, `Float`      | `<v>` numeric (no `t` attribute) |
-| `true`, `false`         | `t="b"` with `<v>1</v>`/`<v>0</v>` |
-| `Date`, `Time`          | raises `Rbxl::EditableCellTypeError` |
+| Ruby                         | XLSX representation              |
+|------------------------------|----------------------------------|
+| `nil`                        | empty cell (preserves `s` style) |
+| `String`                     | `t="inlineStr"` with `<is><t/>`  |
+| `Integer`, `Float`, `Numeric`| `<v>` numeric (no `t` attribute) |
+| `true`, `false`              | `t="b"` with `<v>1</v>`/`<v>0</v>` |
+| `Date`                       | serial; built-in short date (14) unless the cell already has a date format |
+| `Time`, `DateTime`           | fractional serial; built-in date-time (22) unless the cell already has a date format |
+
+Dates honor the workbook's 1900 / 1904 date system, and the wall-clock
+fields of a `Time` are written as-is (Excel has no time zones). Reading a
+date cell back through `EditableCell#value` returns the serial number;
+use `Rbxl.open(path, date_conversion: true)` for `Date`/`Time` objects.
 
 Strings always round-trip as inline strings — `xl/sharedStrings.xml` is
 never mutated, so the SST entries that the cells you _didn't_ touch still
@@ -376,20 +408,72 @@ cell leaves an orphaned SST entry; for template fill-ins that's
 negligible, and it's the simplest design that guarantees deterministic
 output.
 
-`Date`/`Time`/`DateTime` writes raise `Rbxl::EditableCellTypeError` in
-1.4.0 — the cell's `numFmt` style would also have to be the right
-date-pattern style for Excel to render the value, and silently picking
-one is the kind of magic this design promise is built to avoid. Convert
-to an Excel serial yourself if you need a date cell, and rely on the
-template's existing date-formatted style index to render it.
+#### Styling in edit mode
+
+```ruby
+# Change part of the template's look; everything else is kept.
+cell.style(font: { color: "C00000" })          # same face/size, now red
+cell.style(fill: { color: "FFF2CC" })          # highlight
+cell.style(border: { bottom: { style: "double" } })
+cell.style(number_format: "#,##0")
+
+# Or register a complete style and assign it.
+header = book.add_style(font: { bold: true }, fill: { color: "DDEBF7" })
+cell.style_id = header
+cell.style_id   # => current cellXfs index
+```
+
+`style` merges: `font:` attributes and `alignment:` attributes override
+individually (`bold: false` turns bold off), `border:` overrides only
+the sides you pass (`bottom: nil` removes that line), `fill:` and
+`number_format:` replace. Cells sharing a style that receive the same
+change share one derived style. `add_style` takes the same keywords as
+in write-only mode.
+
+Both only **append** to `xl/styles.xml` — existing `cellXfs` / `fonts` /
+`fills` / `borders` / `numFmts` indices never move, so cells you don't
+touch look exactly as before. `styles.xml` is rewritten only when a style
+was actually added; otherwise it is copied byte-for-byte.
+
+#### Defined names
+
+```ruby
+book.defined_names                       # => ["顧客名", "発行日", ...]
+book.defined_name("顧客名").value = "Acme"
+book.defined_name("小計", sheet: "請求書") # sheet-scoped name
+```
+
+Names match case-insensitively. A workbook-scoped name wins over
+sheet-scoped ones; pass `sheet:` to pick a sheet-scoped name.
+`Rbxl::DefinedNameError` is raised for unknown or ambiguous names and
+for names that refer to a range rather than a single cell.
+
+#### Recalculation
+
+A template's cached formula results (say, `=SUM(D10:D19)`) are stale once
+you write the inputs. When any cell was edited, `save` sets
+`<calcPr fullCalcOnLoad="1"/>` in `xl/workbook.xml`, so Excel and
+LibreOffice recompute every formula on open. Pass `save(path, recalc:
+false)` to leave `workbook.xml` alone. If an edit replaced a formula with
+a value, `xl/calcChain.xml` is dropped (Excel rebuilds it) so it never
+points at a non-formula cell.
+
+#### Adding sheets
+
+`book.add_sheet(name)` appends an empty worksheet and returns it for
+editing. Names follow Excel's rules (1–31 characters, none of
+`[ ] : * ? / \`, no leading/trailing `'`, unique case-insensitively).
+`docProps/app.xml` keeps listing the original sheet titles; Excel and
+LibreOffice don't use it when opening.
 
 #### Out of scope for edit mode
 
-- inserting / deleting / reordering / duplicating sheets
-- editing styles, formulas, named ranges, drawings, or shared strings
+- inserting / deleting rows or columns — `write_rows` never inserts rows;
+  prepare enough rows in the template
+- deleting / renaming / reordering / duplicating sheets
+- editing formulas, defined names, drawings, or shared strings
 - recomputing the worksheet `<dimension>` when a write expands the bounds
-  (Excel recomputes on open; openpyxl-style normalization may arrive in
-  a later release)
+  (Excel recomputes on open)
 - bulk rewrites of a worksheet's data area — touched sheets are loaded
   into a Nokogiri DOM, so memory scales with that sheet's size on disk.
   For data-area rewrites, use `Rbxl.new` instead.

@@ -12,7 +12,9 @@ module Rbxl
   #     fill: { color: "EEEEEE" },
   #   )
   #
-  # Colors are 6-character RRGGBB hex strings without the leading +#+.
+  # Colors are RRGGBB hex strings (a leading +#+ is accepted); they are
+  # written as opaque 8-digit ARGB (+FFRRGGBB+). 8-digit ARGB input is
+  # passed through as-is.
   class Style
     # @return [Hash{Symbol=>Object}, nil] font attributes (+name+, +size+, +bold+, +italic+, +underline+, +color+)
     attr_reader :font

@@ -10,6 +10,8 @@ module Rbxl
   type dimensions = { ref: String, max_col: Integer, max_row: Integer }
 
   type editable_cell_value = String | Integer | Float | bool | nil
+  type editable_cell_input = String | Numeric | bool | Date | Time | nil
+  type style_component = Hash[Symbol | String, untyped]
 
   def self.open: (pathish path, ?read_only: bool, ?edit: bool, ?streaming: bool, ?date_conversion: bool) -> (ReadOnlyWorkbook | EditableWorkbook)
                | [T] (pathish path, ?read_only: bool, ?edit: bool, ?streaming: bool, ?date_conversion: bool) { (ReadOnlyWorkbook | EditableWorkbook) -> T } -> T
@@ -55,6 +57,9 @@ module Rbxl
   class EditableCellTypeError < Error
   end
 
+  class DefinedNameError < Error
+  end
+
   class Cell
     attr_accessor value: cell_value
     attr_accessor coordinate: String?
@@ -80,7 +85,9 @@ module Rbxl
     attr_reader value: untyped
     attr_reader style_id: Integer?
 
-    def initialize: (untyped value, ?style_id: Integer?) -> void
+    attr_reader hyperlink: String?
+
+    def initialize: (untyped value, ?style_id: Integer?, ?hyperlink: String?) -> void
   end
 
   class Row
@@ -132,6 +139,7 @@ module Rbxl
     attr_reader worksheets: Array[WriteOnlyWorksheet]
 
     def initialize: () -> void
+    def add_style: (?font: style_component?, ?fill: style_component?, ?border: style_component?, ?alignment: style_component?, ?number_format: String?) -> Integer
     def add_sheet: (String name) -> WriteOnlyWorksheet
     def save: (pathish path) -> String
     def close: () -> bool
@@ -142,6 +150,10 @@ module Rbxl
     attr_reader name: String
 
     def initialize: (name: String) -> void
+    def column_width: (Integer | Range[Integer] index_or_range, Numeric width) -> WriteOnlyWorksheet
+    def row_height: (Integer | Range[Integer] index_or_range, Numeric height) -> WriteOnlyWorksheet
+    def freeze!: (?rows: Integer, ?cols: Integer) -> WriteOnlyWorksheet
+    def merge: (String range_or_from, ?String to) -> WriteOnlyWorksheet
     def <<: (row_input values) -> WriteOnlyWorksheet
     def append: (row_input values) -> WriteOnlyWorksheet
     def to_xml: () -> String
@@ -162,7 +174,11 @@ module Rbxl
     def sheet: (String | Integer name_or_index) -> EditableWorksheet
     def sheets: () { (EditableWorksheet) -> void } -> void
               | () -> Enumerator[EditableWorksheet, void]
-    def save: (?pathish? path) -> String
+    def add_sheet: (String name) -> EditableWorksheet
+    def add_style: (?font: style_component?, ?fill: style_component?, ?border: style_component?, ?alignment: style_component?, ?number_format: String?) -> Integer
+    def defined_names: () -> Array[String]
+    def defined_name: (String name, ?sheet: (String | Integer)?) -> EditableCell
+    def save: (?pathish? path, ?recalc: bool) -> String
     def close: () -> bool
     def closed?: () -> bool
   end
@@ -173,9 +189,13 @@ module Rbxl
     attr_reader name: String
     attr_reader entry_path: String
 
-    def initialize: (zip: untyped, entry_path: String, workbook_path: String, shared_strings: Array[String], name: String) -> void
+    MAX_COLUMN: Integer
+    MAX_ROW: Integer
+
+    def initialize: (workbook: EditableWorkbook, zip: untyped, entry_path: String, workbook_path: String, shared_strings: Array[String], name: String, ?source_xml: String?) -> void
     def cell: (String coordinate) -> EditableCell
     def []: (String coordinate) -> EditableCell
+    def write_rows: (String anchor, Array[Array[editable_cell_input]] rows) -> EditableWorksheet
     def dirty?: () -> bool
     def to_xml: () -> String
   end
@@ -187,7 +207,10 @@ module Rbxl
 
     def initialize: (worksheet: EditableWorksheet, coordinate: String) -> void
     def value: () -> editable_cell_value
-    def value=: (editable_cell_value new_value) -> editable_cell_value
+    def value=: (editable_cell_input new_value) -> editable_cell_input
+    def style_id: () -> Integer
+    def style_id=: (Integer id) -> Integer
+    def style: (?font: style_component?, ?fill: style_component?, ?border: style_component?, ?alignment: style_component?, ?number_format: String?) -> EditableCell
   end
 
   module SharedStringsLoader

@@ -517,15 +517,6 @@ class EditableTest < Minitest::Test
 
   # ---------- type rejection ----------
 
-  def test_date_value_raises_editable_cell_type_error
-    Rbxl.open(FIXTURE_PATH, edit: true) do |book|
-      err = assert_raises(Rbxl::EditableCellTypeError) do
-        book.sheet("Sheet1")["A1"].value = Date.new(2026, 4, 27)
-      end
-      assert_includes err.message, "Date"
-    end
-  end
-
   def test_arbitrary_object_raises_editable_cell_type_error
     Rbxl.open(FIXTURE_PATH, edit: true) do |book|
       assert_raises(Rbxl::EditableCellTypeError) do

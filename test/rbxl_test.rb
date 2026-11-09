@@ -689,7 +689,7 @@ class RbxlTest < Minitest::Test
 
       assert_includes styles, '<fills count="3">'
       assert_includes styles, "gray125"
-      assert_includes styles, '<fgColor rgb="EEEEEE"/>'
+      assert_includes styles, '<fgColor rgb="FFEEEEEE"/>'
     end
   end
 
