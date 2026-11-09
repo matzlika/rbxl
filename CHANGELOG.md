@@ -68,8 +68,6 @@ follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 - Style colors (`font:` / `fill:` / `border:` `color`) are written as
   8-digit ARGB (`FFRRGGBB`), the form ECMA-376 specifies. A leading `#`
   is accepted; 8-digit input passes through.
-- The `rubyzip` dependency now allows 3.x (`>= 2.3, < 4`). The suite
-  passes on rubyzip 2.4.1 and 3.7.0.
 - Edit mode no longer raises `Rbxl::EditableCellTypeError` for
   `Date`/`Time`/`DateTime` (see above). Editing a cell now also touches
   `xl/workbook.xml` (the recalculation flag) unless `recalc: false`.
